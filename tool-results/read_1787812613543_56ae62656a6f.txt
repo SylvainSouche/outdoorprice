@@ -1,0 +1,655 @@
+     1→// Enrichissement : récupère la page produit et extrait les métadonnées structurées.
+     2→//
+     3→// Sources d'extraction (par ordre de fiabilité) :
+     4→//  1. JSON-LD <script type="application/ld+json"> avec @type Product
+     5→//  2. Microdata HTML5 : [itemtype*="schema.org/Product"] + itemprop
+     6→//  3. Open Graph / meta tags : og:brand, product:brand, etc.
+     7→//  4. Sélecteurs génériques communs : tableau specs, déclinaisons couleur/taille
+     8→//
+     9→// Toute extraction est tolérante : si une source échoue, on tente la suivante.
+    10→import * as cheerio from "cheerio";
+    11→import { fetchHtml, absUrl } from "./http";
+    12→import type { ProductMetadata, ProductResult, SiteId } from "./types";
+    13→import { SITES } from "./types";
+    14→import { classifyTaxonomy } from "./taxonomy";
+    15→
+    16→/** Limite de produit à enrichir par site (perf : éviter 200+ fetchs). */
+    17→export const ENRICH_TOP_N_PER_SITE = 6;
+    18→
+    19→interface JsonLdProduct {
+    20→  "@type"?: string | string[];
+    21→  name?: string;
+    22→  brand?: { name?: string } | string;
+    23→  category?: string;
+    24→  color?: string;
+    25→  size?: string;
+    26→  sku?: string;
+    27→  gtin?: string;
+    28→  gtin13?: string;
+    29→  gtin12?: string;
+    30→  ean?: string;
+    31→  mpn?: string;
+    32→  weight?: string | { value?: string; unitCode?: string };
+    33→  material?: string;
+    34→  aggregateRating?: { ratingValue?: string | number; reviewCount?: string | number };
+    35→  offers?: any;
+    36→  [k: string]: any;
+    37→}
+    38→
+    39→function asString(v: unknown): string | undefined {
+    40→  if (v == null) return undefined;
+    41→  if (typeof v === "string") return v.trim() || undefined;
+    42→  if (typeof v === "number") return String(v);
+    43→  if (typeof v === "object" && v !== null && "name" in v) {
+    44→    return asString((v as any).name);
+    45→  }
+    46→  return String(v).trim() || undefined;
+    47→}
+    48→
+    49→function extractJsonLdProducts($: cheerio.CheerioAPI): JsonLdProduct[] {
+    50→  const out: JsonLdProduct[] = [];
+    51→  $('script[type="application/ld+json"]').each((_, el) => {
+    52→    const raw = $(el).contents().text().trim();
+    53→    if (!raw) return;
+    54→    try {
+    55→      const parsed = JSON.parse(raw);
+    56→      const candidates: any[] = Array.isArray(parsed) ? parsed : [parsed];
+    57→      for (const c of candidates) {
+    58→        // graph de @graph
+    59→        if (c && typeof c === "object" && Array.isArray(c["@graph"])) {
+    60→          candidates.push(...c["@graph"]);
+    61→        }
+    62→        const t = c && c["@type"];
+    63→        const types = Array.isArray(t) ? t : [t];
+    64→        if (types.some((x) => String(x).toLowerCase().includes("product"))) {
+    65→          out.push(c as JsonLdProduct);
+    66→        }
+    67→      }
+    68→    } catch {
+    69→      // JSON-LD cassé : on ignore
+    70→    }
+    71→  });
+    72→  return out;
+    73→}
+    74→
+    75→function extractMicrodata($: cheerio.CheerioAPI): Record<string, string> {
+    76→  const out: Record<string, string> = {};
+    77→  const scope = $('[itemtype*="schema.org/Product"], [itemtype*="schema.org/Offer"]').first();
+    78→  if (!scope.length) return out;
+    79→  scope.find("[itemprop]").each((_, el) => {
+    80→    const $el = $(el);
+    81→    const prop = $el.attr("itemprop");
+    82→    if (!prop) return;
+    83→    if (out[prop]) return;
+    84→    const val =
+    85→      $el.attr("content") ||
+    86→      $el.attr("href") ||
+    87→      $el.find('[itemprop="name"], .value').first().text() ||
+    88→      $el.text();
+    89→    const cleaned = (val || "").trim();
+    90→    if (cleaned) out[prop] = cleaned;
+    91→  });
+    92→  return out;
+    93→}
+    94→
+    95→function extractMetaTags($: cheerio.CheerioAPI): Record<string, string> {
+    96→  const out: Record<string, string> = {};
+    97→  const picks: Record<string, string> = {
+    98→    brand: 'meta[property="og:brand"], meta[property="product:brand"], meta[name="brand"], meta[name="twitter:brand"]',
+    99→    category: 'meta[property="product:category"], meta[name="category"]',
+   100→    gtin: 'meta[property="product:gtin"], meta[name="gtin"]',
+   101→    ean: 'meta[name="ean"]',
+   102→    sku: 'meta[property="product:sku"], meta[name="sku"]',
+   103→    mpn: 'meta[property="product:mpn"], meta[name="mpn"]',
+   104→    color: 'meta[property="product:color"], meta[name="color"]',
+   105→    material: 'meta[property="product:material"], meta[name="material"]',
+   106→    rating: 'meta[property="product:rating:value"], meta[name="rating"]',
+   107→    reviewCount: 'meta[property="product:rating:count"], meta[name="review_count"]',
+   108→  };
+   109→  for (const [k, sel] of Object.entries(picks)) {
+   110→    const v = $(sel).first().attr("content");
+   111→    if (v && v.trim()) out[k] = v.trim();
+   112→  }
+   113→  return out;
+   114→}
+   115→
+   116→/** Tableau technique générique : paires clé/valeur dans les listes dl/dt/dd, table tr td, etc. */
+   117→function extractSpecsTable($: cheerio.CheerioAPI): Record<string, string> {
+   118→  const out: Record<string, string> = {};
+   119→  // <dl><dt>K</dt><dd>V</dd></dl>
+   120→  $("dl dt").each((_, dt) => {
+   121→    const $dt = $(dt);
+   122→    const k = $dt.text().trim().replace(/:$/, "");
+   123→    const v = $dt.next("dd").text().trim();
+   124→    if (k && v && !out[k]) out[k] = v;
+   125→  });
+   126→  // table tr > td*2
+   127→  $("table tr, .specs tr, .product-features tr, .technical-data tr").each((_, tr) => {
+   128→    const $tr = $(tr);
+   129→    const tds = $tr.find("td, th");
+   130→    if (tds.length >= 2) {
+   131→      const k = $(tds[0]).text().trim().replace(/:$/, "");
+   132→      const v = $(tds[1]).text().trim();
+   133→      if (k && v && !out[k]) out[k] = v;
+   134→    }
+   135→  });
+   136→  // listes .feature / .spec génériques
+   137→  $(".product-features li, .specs li, .features li, .product-attributes li").each((_, li) => {
+   138→    const txt = $(li).text().trim();
+   139→    const m = txt.match(/^([A-Za-zÀ-ÿ][\w\s/+-]{1,40})\s*[:：]\s*(.+)$/);
+   140→    if (m) {
+   141→      const k = m[1].trim();
+   142→      const v = m[2].trim();
+   143→      if (k && v && !out[k]) out[k] = v;
+   144→    }
+   145→  });
+   146→  return out;
+   147→}
+   148→
+   149→/** Breadcrumb / fil d'ariane : source riche de catégorie/sous-catégorie/sport. */
+   150→function extractBreadcrumb($: cheerio.CheerioAPI): string[] {
+   151→  const crumbs: string[] = [];
+   152→  // Microdata breadcrumb
+   153→  $('[itemtype*="schema.org/BreadcrumbList"] [itemprop="itemListElement"]').each((_, el) => {
+   154→    const name = $(el).find('[itemprop="name"]').first().text().trim();
+   155→    if (name) crumbs.push(name);
+   156→  });
+   157→  if (crumbs.length === 0) {
+   158→    // Breadcrumb générique
+   159→    $(
+   160→      '.breadcrumb li, .breadcrumbs li, nav[aria-label*="breadcrumb" i] li, .breadcrumb a, .breadcrumbs a'
+   161→    ).each((_, el) => {
+   162→      const name = $(el).text().trim();
+   163→      if (name && name.length < 60 && !crumbs.includes(name)) crumbs.push(name);
+   164→    });
+   165→  }
+   166→  return crumbs;
+   167→}
+   168→
+   169→/** Extrait une année-modèle depuis le titre ou les specs (ex: 2024, Édition 2023). */
+   170→function extractModelYear(title: string, specs: Record<string, string>): string | undefined {
+   171→  const m = title.match(/\b(20\d{2})\b/);
+   172→  if (m) return m[1];
+   173→  for (const [k, v] of Object.entries(specs)) {
+   174→    const kl = k.toLowerCase();
+   175→    if (kl.includes("annee") || kl.includes("year") || kl.includes("modèle") || kl.includes("model")) {
+   176→      const m2 = String(v).match(/\b(20\d{2})\b/);
+   177→      if (m2) return m2[1];
+   178→    }
+   179→  }
+   180→  return undefined;
+   181→}
+   182→
+   183→/** Parse un poids en grammes depuis une chaîne ("850 g", "1.2 kg", "850g", etc.). */
+   184→export function parseWeightGrams(raw: string | undefined): number | undefined {
+   185→  if (!raw) return undefined;
+   186→  const s = raw.toLowerCase().replace(/\s+/g, "").replace(",", ".");
+   187→  let m = s.match(/(\d+(?:\.\d+)?)kg/);
+   188→  if (m) return Math.round(parseFloat(m[1]) * 1000);
+   189→  m = s.match(/(\d+(?:\.\d+)?)g\b/);
+   190→  if (m) return Math.round(parseFloat(m[1]));
+   191→  m = s.match(/(\d+(?:\.\d+)?)gr\b/);
+   192→  if (m) return Math.round(parseFloat(m[1]));
+   193→  return undefined;
+   194→}
+   195→
+   196→// Mots connus comme désignant une couleur (FR + EN + outdoor colorways).
+   197→// On garde la première lettre majuscule pour l'affichage, et on compare
+   198→// insensible à la casse / accents / pluriels.
+   199→const COLOR_WORDS = new Set([
+   200→  // FR
+   201→  "noir", "blanc", "rouge", "bleu", "vert", "jaune", "orange", "violet",
+   202→  "gris", "rose", "marron", "beige", "kaki", "anthracite", "bordeaux",
+   203→  "turquoise", "creme", "ivoire", "sable", "corail", "argile",
+   204→  // EN
+   205→  "black", "white", "red", "blue", "green", "yellow", "purple", "pink",
+   206→  "brown", "navy", "teal", "olive", "gold", "silver", "copper", "bronze",
+   207→  "grey", "gray",
+   208→  // Outdoor / Dynafit / Salomon colorway names
+   209→  "fluo", "fluorescent", "neon", "out", "balsam", "cinder", "alabama",
+   210→  "overcast", "cabana", "storm", "sunset", "sand", "ash", "fire",
+   211→  "crimson", "amber", "graphite", "slate", "moss", "lagoon", "aqua",
+   212→  "mint", "lime", "coralred", "rust",
+   213→]);
+   214→
+   215→/** Normalise pour comparaison (casse, accents, pluriels simples). */
+   216→function canon(s: string): string {
+   217→  return s
+   218→    .toLowerCase()
+   219→    .normalize("NFD")
+   220→    .replace(/[\u0300-\u036f]/g, "")
+   221→    .trim()
+   222→    .replace(/s$/, "");
+   223→}
+   224→
+   225→/** Capitalise proprement ("noir" → "Noir", "bleu" → "Bleu"). */
+   226→function capitalize(s: string): string {
+   227→  return s.charAt(0).toUpperCase() + s.slice(1).toLowerCase();
+   228→}
+   229→
+   230→/** Extrait les couleurs depuis un titre produit.
+   231→ *  Patterns reconnus :
+   232→ *    - « /<coloris> » ou « /<color1> <color2> » suffixe (Montaz)
+   233→ *    - « <color1> <color2> » après le dernier token « / »
+   234→ *    - « couleur : <...> » explicite
+   235→ *
+   236→ *  On retourne chaque mot de couleur distinct, capitalisé, dédupliqué.
+   237→ *  On n'ajoute PAS les mots non reconnus (ex: « backpack », « dynafit »). */
+   238→export function extractColorsFromTitle(title: string | undefined): string[] {
+   239→  if (!title) return [];
+   240→  const found: string[] = [];
+   241→  const seen = new Set<string>();
+   242→
+   243→  // 1) Pattern « /<suffix> » (souvent un coloris composé)
+   244→  //    ex: « Dynafit Radical 24 Backpack /noir out » → "noir", "out"
+   245→  const slashMatch = title.match(/\/([^/]+)$/);
+   246→  if (slashMatch) {
+   247→    const suffix = slashMatch[1].trim();
+   248→    // Prend chaque mot du suffixe et garde ceux qui sont des couleurs connues
+   249→    for (const word of suffix.split(/[\s\-_,.;:|·()'"’°]+/)) {
+   250→      const w = word.trim();
+   251→      if (!w) continue;
+   252→      const c = canon(w);
+   253→      if (COLOR_WORDS.has(c) && !seen.has(c)) {
+   254→        seen.add(c);
+   255→        found.push(capitalize(w));
+   256→      }
+   257→    }
+   258→  }
+   259→
+   260→  // 2) Pattern « couleur : <...> » ou « color : <...> »
+   261→  const colorColon = title.match(/(?:couleur|color)\s*[:=]\s*([^,;|]+)/i);
+   262→  if (colorColon) {
+   263→    for (const word of colorColon[1].trim().split(/[\s\-_,.;:|·()'"’°]+/)) {
+   264→      const w = word.trim();
+   265→      if (!w) continue;
+   266→      const c = canon(w);
+   267→      if (COLOR_WORDS.has(c) && !seen.has(c)) {
+   268→        seen.add(c);
+   269→        found.push(capitalize(w));
+   270→      }
+   271→    }
+   272→  }
+   273→
+   274→  // 3) Scan global : tous les mots qui sont des couleurs connues
+   275→  //    (utile quand il n'y a pas de « / » — ex: « Dynafit Radical Bleu »)
+   276→  if (found.length === 0) {
+   277→    const words = title.split(/[\s\-_,.;:|·()'"’°/]+/);
+   278→    for (const word of words) {
+   279→      const w = word.trim();
+   280→      if (!w || w.length < 3) continue;
+   281→      const c = canon(w);
+   282→      if (COLOR_WORDS.has(c) && !seen.has(c)) {
+   283→        seen.add(c);
+   284→        found.push(capitalize(w));
+   285→      }
+   286→    }
+   287→  }
+   288→
+   289→  return found.slice(0, 6);
+   290→}
+   291→
+   292→/** Déclinaisons couleur / taille visibles dans la page (selectors de variation). */
+   293→function extractVariations($: cheerio.CheerioAPI): { colors: string[]; sizes: string[] } {
+   294→  const colors = new Set<string>();
+   295→  const sizes = new Set<string>();
+   296→
+   297→  const colorSelectors = [
+   298→    '[data-color]', '[data-attribute="color"]',
+   299→    '.color-swatch, .swatch-color, .color-option, .product-color .option',
+   300→    'select[name*="color" i] option', 'select[name*="couleur" i] option',
+   301→    '[aria-label*="couleur" i]', '[aria-label*="color" i]',
+   302→  ];
+   303→  const sizeSelectors = [
+   304→    '[data-size]', '[data-attribute="size"]', '[data-attribute="taille"]',
+   305→    '.size-option, .product-size .option, .size-swatch',
+   306→    'select[name*="size" i] option', 'select[name*="taille" i] option',
+   307→    '[aria-label*="taille" i]', '[aria-label*="size" i]',
+   308→  ];
+   309→
+   310→  $(colorSelectors.join(", ")).each((_, el) => {
+   311→    const $el = $(el);
+   312→    const v = ($el.attr("data-color") || $el.attr("title") || $el.attr("aria-label") || $el.text() || "")
+   313→      .trim()
+   314→      .split(/[\s,|·-]+/)[0];
+   315→    if (v && v.length >= 2 && v.length <= 30) colors.add(v);
+   316→  });
+   317→  $(sizeSelectors.join(", ")).each((_, el) => {
+   318→    const $el = $(el);
+   319→    const v = ($el.attr("data-size") || $el.attr("title") || $el.attr("value") || $el.text() || "")
+   320→      .trim();
+   321→    if (v && v.length >= 1 && v.length <= 12) sizes.add(v);
+   322→  });
+   323→
+   324→  return { colors: [...colors].slice(0, 12), sizes: [...sizes].slice(0, 20) };
+   325→}
+   326→
+   327→/** Détection du genre à partir du titre/catégorie.
+   328→ *  Reconnaît FR, EN, DE. Les marqueurs standalone « W » et « M » (utilisés
+   329→ *  par Snowleader et d'autres) sont aussi reconnus via word boundary \b —
+   330→ *  ils ne matchent PAS à l'intérieur d'un mot comme « Mountain » ou « Pro ». */
+   331→function detectGender(text: string): string | undefined {
+   332→  const t = text.toLowerCase();
+   333→  // Order matters: check "unisexe/mixte" first to avoid being overridden by
+   334→  // "homme/femme" substring matches inside "unisex homme/femme" labels.
+   335→  if (/\b(unisexe|unisex|mixed|herren.?damen|damen.?herren|h\/f|f\/h)\b/.test(t)) return "Mixte";
+   336→  // Femme : FR + EN + DE + standalone W (utilisé par Snowleader, etc.)
+   337→  // Note: \bW\b matche seulement un W standalone (pas le W de "Mountain" ou "Wide").
+   338→  if (
+   339→    /\b(femme|women|woman|girl|dame|damen|w|weiblich)\b/.test(t) ||
+   340→    /women'?s/.test(t) ||
+   341→    /dames?/.test(t)
+   342→  ) return "Femme";
+   343→  // Homme : FR + EN + DE + standalone M
+   344→  if (
+   345→    /\b(homme|men|man|boy|monsieur|herren|m|mannlich)\b/.test(t) ||
+   346→    /men'?s/.test(t)
+   347→  ) return "Homme";
+   348→  if (/\b(enfant|kid|child|junior|boys|girls|kinder)\b/.test(t)) return "Enfant";
+   349→  return undefined;
+   350→}
+   351→
+   352→function weightFromSpecs(specs: Record<string, string>): string | undefined {
+   353→  for (const [k, v] of Object.entries(specs)) {
+   354→    const kl = k.toLowerCase();
+   355→    if (kl.includes("poids") || kl.includes("weight") || kl.includes("gewicht")) {
+   356→      return v;
+   357→    }
+   358→  }
+   359→  return undefined;
+   360→}
+   361→
+   362→function materialFromSpecs(specs: Record<string, string>): string | undefined {
+   363→  for (const [k, v] of Object.entries(specs)) {
+   364→    const kl = k.toLowerCase();
+   365→    if (kl.includes("mati") || kl.includes("material") || kl.includes("materialien")) {
+   366→      return v;
+   367→    }
+   368→  }
+   369→  return undefined;
+   370→}
+   371→
+   372→function ratingNum(v: unknown): number | undefined {
+   373→  if (v == null) return undefined;
+   374→  const n = typeof v === "number" ? v : parseFloat(String(v).replace(",", "."));
+   375→  return Number.isFinite(n) && n > 0 ? n : undefined;
+   376→}
+   377→
+   378→function reviewNum(v: unknown): number | undefined {
+   379→  if (v == null) return undefined;
+   380→  const n = typeof v === "number" ? v : parseInt(String(v).replace(/[^\d]/g, ""), 10);
+   381→  return Number.isFinite(n) && n > 0 ? n : undefined;
+   382→}
+   383→
+   384→/**
+   385→ * Enrichit un ProductResult en récupérant sa page produit.
+   386→ * En cas d'échec réseau/parsing, retourne quand même un objet partiel
+   387→ * (titre/URL connus), sans faire planter le workflow.
+   388→ */
+   389→export async function enrichProduct(p: ProductResult, signal?: AbortSignal): Promise<ProductMetadata> {
+   390→  const siteMeta = SITES[p.site as SiteId];
+   391→  const referer = siteMeta?.baseUrl;
+   392→
+   393→  // Timeout for product page fetch. ProBikeShop and other Playwright-fallback
+   394→  // sites need more time (country modal dismissal + Cloudflare). Default 10s,
+   395→  // but 20s for known slow sites.
+   396→  const isSlowSite = p.site === "probikeshop" || p.site === "barrabes" || p.site === "alltricks";
+   397→  const fetchTimeoutMs = isSlowSite ? 20000 : 10000;
+   398→
+   399→  let html = "";
+   400→  try {
+   401→    const res = await fetchHtml(p.url, { signal, referer, timeoutMs: fetchTimeoutMs });
+   402→    html = res.html;
+   403→  } catch {
+   404→    // On retourne des métadonnées minimales dérivées du titre de recherche
+   405→    return {
+   406→      brand: guessBrandFromTitle(p.title),
+   407→      gender: detectGender(p.title),
+   408→    };
+   409→  }
+   410→
+   411→  const $ = cheerio.load(html);
+   412→  const jsonLd = extractJsonLdProducts($);
+   413→  const microdata = extractMicrodata($);
+   414→  const meta = extractMetaTags($);
+   415→  const specs = extractSpecsTable($);
+   416→  const breadcrumbs = extractBreadcrumb($);
+   417→  const { colors, sizes } = extractVariations($);
+   418→
+   419→  // Couleur dérivée du titre : les sites comme Montaz suffixent le titre avec
+   420→  // « /<coloris> » (ex: « Dynafit Radical 24 Backpack /noir out »).
+   421→  // On extrait les mots connus comme couleurs, pour ne pas récupérer « backpack ».
+   422→  const titleColors = extractColorsFromTitle(p.title);
+   423→  for (const c of titleColors) colors.push(c);
+   424→
+   425→  // Fusion par priorité : JSON-LD > microdata > meta > specs
+   426→  const ld = jsonLd[0] || {};
+   427→  const brand =
+   428→    asString(ld.brand) ||
+   429→    microdata.brand ||
+   430→    meta.brand ||
+   431→    guessBrandFromTitle(p.title);
+   432→  const rawCategory =
+   433→    asString(ld.category) ||
+   434→    microdata.category ||
+   435→    meta.category ||
+   436→    undefined;
+   437→  const ean = ld.ean || ld.gtin13 || ld.gtin12 || microdata.ean || meta.ean || undefined;
+   438→  const gtin = ld.gtin || microdata.gtin || meta.gtin || undefined;
+   439→  const sku = ld.sku || microdata.sku || meta.sku || undefined;
+   440→  const mpn = ld.mpn || microdata.mpn || meta.mpn || undefined;
+   441→  const color = ld.color || microdata.color || meta.color || undefined;
+   442→  if (color && colors.length === 0) colors.push(String(color));
+   443→  const ldWeight = ld.weight
+   444→    ? typeof ld.weight === "string"
+   445→      ? ld.weight
+   446→      : `${ld.weight.value ?? ""} ${ld.weight.unitCode ?? ""}`.trim()
+   447→    : undefined;
+   448→  const weight = ldWeight || weightFromSpecs(specs);
+   449→  const weightGrams = parseWeightGrams(weight);
+   450→  const material = materialFromSpecs(specs) || asString(ld.material) || meta.material;
+   451→  const rating = ratingNum(ld.aggregateRating?.ratingValue || microdata.rating || meta.rating);
+   452→  const reviewCount = reviewNum(ld.aggregateRating?.reviewCount || microdata.reviewCount || meta.reviewCount);
+   453→  const modelYear = extractModelYear(p.title, specs);
+   454→
+   455→  // Taxonomie normalisée depuis catégorie brute + breadcrumb + titre
+   456→  const taxonomy = classifyTaxonomy(rawCategory, breadcrumbs.join(" / "), p.title);
+   457→  const category = taxonomy.category || rawCategory;
+   458→  const subcategory = taxonomy.subcategory;
+   459→  const sport = taxonomy.sport;
+   460→  const range = taxonomy.range;
+   461→
+   462→  // Attributs techniques : tout sauf les clés déjà mappées
+   463→  const reservedKeys = new Set(
+   464→    ["brand", "category", "subcategory", "sport", "range", "color", "ean", "gtin", "sku", "mpn",
+   465→     "weight", "material", "rating", "reviewcount", "gender", "modelyear", "annee", "year"]
+   466→      .map((k) => k.toLowerCase())
+   467→  );
+   468→  const attributes: Record<string, string> = {};
+   469→  for (const [k, v] of Object.entries(specs)) {
+   470→    const kl = k.toLowerCase();
+   471→    if (reservedKeys.has(kl)) continue;
+   472→    if (kl.length > 40) continue;
+   473→    attributes[k] = v;
+   474→  }
+   475→
+   476→  return {
+   477→    brand,
+   478→    category,
+   479→    subcategory,
+   480→    sport,
+   481→    range,
+   482→    gender: detectGender(`${p.title} ${rawCategory ?? ""}`),
+   483→    color: colors.length ? colors : color ? [String(color)] : undefined,
+   484→    sizes: sizes.length ? sizes : undefined,
+   485→    weight,
+   486→    weightGrams,
+   487→    material,
+   488→    ean: ean ? String(ean) : undefined,
+   489→    gtin: gtin ? String(gtin) : undefined,
+   490→    sku: sku ? String(sku) : undefined,
+   491→    mpn: mpn ? String(mpn) : undefined,
+   492→    modelYear,
+   493→    rating,
+   494→    reviewCount,
+   495→    attributes: Object.keys(attributes).length ? attributes : undefined,
+   496→  };
+   497→}
+   498→
+   499→/** Devine la marque depuis le titre : 1er token en majuscule qui ressemble à une marque outdoor connue. */
+   500→const KNOWN_BRANDS = [
+   501→  "Dynafit", "Scarpa", "Salomon", "Black Diamond", "Arc'teryx", "Patagonia", "Petzl",
+   502→  "La Sportiva", "Mammut", "Salewa", "Atomic", "Fischer", "Rossignol", "Head",
+   503→  "Dynastar", "Movement", "Voile", "G3", "Hagan", "Skitrab", " ATK", "Plum",
+   504→  "Marker", "Tyrolia", "Look", "Pomoca", "Contour", "Colltex", "Simond",
+   505→  "Decathlon", "Forclaz", "Quechua", "Wedze", "Btwin", "Kalenji",
+   506→  "Ortovox", "Deuter", "Osprey", "Gregory", "Vaude", "Lowe Alpine",
+   507→  "Mountain Equipment", "Rab", "The North Face", "Millet", "Eider",
+   508→  "Picture", "Burton", "Capita", "Jones", "Lib Tech", "Ride", "Nitro",
+   509→  "Oakley", "Smith", "POC", "Anon", "Bollé", "Cébé",
+   510→  "Garmin", "Suunto", "Polar", "Coros", "Wahoo",
+   511→  // Trail running / sneakers
+   512→  "Hoka", "HOKA", "Brooks", "Saucony", "On", "Altra", "Topo Athletic", "Inov-8",
+   513→  "Vibram", "Merrell", "Asics", "Nike", "Adidas", "New Balance", "Reebok",
+   514→  // Casual / lifestyle outdoor
+   515→  "Fjällräven", "Fjallraven", "Prana", "PrAna", "Cotopaxi", "Stanley",
+   516→  // Mountaineering hardware
+   517→  // "Black" alone is NOT a brand (false positives in "Black/Outer Orbit" etc.)
+   518→  // — only "Black Diamond" is.
+   519→  "Grivel", "Camp", "CAMP", "Cassin", "BlueWater", "Mammut",
+   520→  "Beal", "Edelrid", "Sterling", "Metolius", "DMM", "Wild Country",
+   521→  // Ski / snowboard apparel
+   522→  "686", "Volcom", "DC", "ThirtyTwo", "Northwave", "Drake", "Flow",
+   523→  // Other outdoor
+   524→  "Lowa", "Hanwag", "Meindl", "Lowa", "AKU", "Salewa", "Garmont", "Crispi",
+   525→  "Rossignol", "Blizzard", "K2", "Nordica", "Tecnica", "Dalbello", "Elan",
+   526→  "Kastle", "Stockli", "Völkl", "Volkl", "Line", "Armada", "Faction",
+   527→  // Cycling apparel & accessories (try FIRST — Castelli/Sportful/Rapha are
+   528→  // more common than the "Giro" helmet brand in cycling jerseys)
+   529→  "Castelli", "CASTELLI", "Sportful", "SPORTFUL", "Rapha", "RAPHA", "Assos", "ASSOS",
+   530→  "Maap", "MAAP", "Bianchi", "BIANCHI", "Pinarello", "PINARELLO", "Cervélo", "Cervelo",
+   531→  "Specialized", "SPECIALIZED", "Trek", "TREK", "Giant", "GIANT", "Merida", "MERIDA",
+   532→  "Cannondale", "CANNONDALE", "Scott", "SCOTT", "BMC", "Orbea", "ORBEA",
+   533→  "Shimano", "SHIMANO", "SRAM", "Campagnolo", "CAMPAGNOLO", "Rotor", "ROTOR",
+   534→  "FSA", "Vision", "Zipp", "ZIPP", "Enve", "ENVE", "Campy", "Epic", "EPIC",
+   535→  "Selle Italia", "Selle Royal", "Brooks England", "Pro", "PRO", "Syncros", "SYNCROS",
+   536→  "Continental", "CONTINENTAL", "Michelin", "MICHELIN", "Pirelli", "PIRELLI",
+   537→  "Vittoria", "VITTORIA", "Tufo", "TUFO", "Challenge", "CHALLENGE",
+   538→  "Garmin", "Wahoo", "Stages", "STAGES", "4iiii", "Pioneer", "PIONEER",
+   539→  // Cycling shoes & helmets (Giro helmets is HERE, after the apparel brands)
+   540→  "Sidi", "SIDI", "Gaerne", "GAERNE", "Northwave", "NORTHWAVE", "Fizik", "FIZIK",
+   541→  "Bontrager", "BONTRAGER", "Giro", "GIRO", "Lazer", "LAZER", "Kask", "KASK",
+   542→  "Mavic", "MAVIC", " DT Swiss ", "Campagnolo", "Fulcrum", "FULCRUM",
+   543→  // Bike components
+   544→  "Fox", "FOX", "RockShox", "ROCKSHOX", "Ohlins", "Öhlins", "DVO", "Manitou", "MANITOU",
+   545→  "Magura", "MAGURA", "Hope", "HOPE", "Avid", "AVID", "TRP", "Shimano", "SRAM",
+   546→];
+   547→
+   548→// Modèles outdoor connus et leur marque associée.
+   549→// Utilisé quand le titre ne contient pas la marque (ex: Snowleader omet « Hoka »
+   550→// du titre « Speedgoat 7 M Bay Leaf/Sea Glass »).
+   551→const MODEL_TO_BRAND: Record<string, string> = {
+   552→  // Hoka models
+   553→  "speedgoat": "Hoka",
+   554→  "clifton": "Hoka",
+   555→  "rincon": "Hoka",
+   556→  "bondi": "Hoka",
+   557→  "mach": "Hoka",
+   558→  "stinson": "Hoka",
+   559→  "arahi": "Hoka",
+   560→  "challenger": "Hoka",
+   561→  "rocket": "Hoka",
+   562→  "mafate": "Hoka",
+   563→  "tarantelle": "Hoka",
+   564→  "evo": "Hoka",
+   565→  "cascadia": "Brooks",
+   566→  // Salomon models
+   567→  "s/lab": "Salomon",
+   568→  "speedcross": "Salomon",
+   569→  "sense": "Salomon",
+   570→  "xon": "Salomon",
+   571→  // Dynafit models
+   572→  "radical": "Dynafit",
+   573→  "rotation": "Dynafit",
+   574→  "st": "Dynafit",
+   575→  "superlite": "Dynafit",
+   576→  "tlt": "Dynafit",
+   577→  "alpine": "Dynafit",
+   578→  // Scarpa models
+   579→  "f1": "Scarpa",
+   580→  "skimo": "Scarpa",
+   581→  "alien": "Scarpa",
+   582→  "maestrale": "Scarpa",
+   583→  "gea": "Scarpa",
+   584→  // Black Diamond models
+   585→  "helio": "Black Diamond",
+   586→  "vector": "Black Diamond",
+   587→  "megawatt": "Black Diamond",
+   588→};
+   589→
+   590→export function guessBrandFromTitle(title: string): string | undefined {
+   591→  const t = title.toLowerCase();
+   592→  // 1. Cherche une marque connue directement dans le titre
+   593→  //    IMPORTANT : on utilise \b (word boundary) au lieu de .includes()
+   594→  //    pour éviter les faux positifs : « On » dans « connue », « DC » dans « dcore »,
+   595→  //    « K2 » dans « K200 » etc. ne doivent PAS matcher.
+   596→  for (const b of KNOWN_BRANDS) {
+   597→    const bl = b.toLowerCase().trim();
+   598→    if (!bl) continue;
+   599→    // Echappe les caractères spéciaux regex
+   600→    const escaped = bl.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+   601→    // \b nécessite qu'on soit entre un \w et un \W
+   602→    const re = new RegExp(`\\b${escaped}\\b`, "i");
+   603→    if (re.test(t)) return b.trim();
+   604→  }
+   605→  // 2. Si pas de marque trouvée, cherche un modèle connu et infère la marque
+   606→  const tokens = t.split(/[\s\-_,.;:|·/()'"’°]+/).filter(Boolean);
+   607→  for (const tok of tokens) {
+   608→    if (MODEL_TO_BRAND[tok]) return MODEL_TO_BRAND[tok];
+   609→  }
+   610→  // 3. Fallback : 1er mot capitalisé de 3+ lettres, en ignorant les mots qui
+   611→  //    sont en fait des catégories de produits en français (pas des marques).
+   612→  //    Sans ça, "Manchettes CASTELLI ESPRESSO Bordeaux" → "Manchettes" (faux).
+   613→  const NON_BRAND_WORDS = new Set([
+   614→    "Le", "La", "Les", "Des", "The", "Pour", "Avec", "De", "Du", "Et", "Or",
+   615→    // Catégories de produits FR qui apparaissent en début de titre
+   616→    "Manchettes", "Jambières", "Jambi", "Couvre", "Couvre-Chaussures",
+   617→    "Gants", "Maillot", "Cuissard", "Salopette", "Veste", "Pantalon",
+   618→    "Casque", "Casquette", "Chaussures", "Chaussettes", "Gourde",
+   619→    "Bidon", "Selle", "Guidon", "Cintre", "Pédale", "Pedale", "Pédales",
+   620→    "Roue", "Roues", "Pneu", "Pneus", "Chambre", "Dérailleur", "Derailleur",
+   621→    "Frein", "Freins", "Disque", "Disques", "Cassette", "Plateau", "Plateaux",
+   622→    "Chaîne", "Chaine", "Crank", "Jeu", "Direction", "Tige", "Tiges",
+   623→    "Sacoche", "Sacoches", "Sac", "Sacs", "Sac à dos", "Antivol", "Antivols",
+   624→    "Lampe", "Lampes", "Phare", "Phares", "Éclairage", "Eclairage",
+   625→    "Protège", "Protege", "Protège-Cadre", "Porte", "Porte-Bidon",
+   626→    "Support", "Supports", "Fixation", "Fixations", "Pompe", "Pompes",
+   627→    "Outillage", "Outil", "Outils", "Réparation", "Reparation",
+   628→    "Nutrition", "Boisson", "Boissons", "Gel", "Barre", "Barres",
+   629→    // Catégories outdoor
+   630→    "Skis", "Skins", "Peaux", "Chaussures", "Bâtons", "Batons", "Crampons",
+   631→    "Piolets", "Casques", "Harness", "Harnais", "Mousqueton", "Mousquetons",
+   632→    "Corde", "Cordes", "Baudrier", "Baudriers", "Descendeur", "Assureur",
+   633→    "Sac", "Sacs", "Saccoche", "Tente", "Tentes", "Matelas", "Duvet",
+   634→    "Réchaud", "Rechaud", "Popote", "Boussole", "Altitude",
+   635→    // Couleurs communes en FR
+   636→    "Noir", "Blanc", "Rouge", "Bleu", "Vert", "Jaune", "Orange", "Rose",
+   637→    "Gris", "Marron", "Beige", "Bordeaux", "Marine", "Turquoise", "Violet",
+   638→    // Adjectifs descriptifs
+   639→    "Homme", "Femme", "Mixte", "Junior", "Enfant", "Unisexe",
+   640→    "Court", "Courts", "Long", "Longs", "Court", "Court",
+   641→    "Imperméable", "Impermeable", "Respirant", "Respirants", "Léger", "Légers",
+   642→    // Contexte/usage
+   643→    "Route", "VTT", "Vélo", "Velo", "Gravel", "Cyclocross", "BMX", "Enduro",
+   644→    "Trail", "Running", "Fitness", "Urbain", "Ville", "Trekking", "Touring",
+   645→    "Compétition", "Competition", "Performance", "Loisir", "Pro", "Premium",
+   646→    // Années / collections
+   647→    "Giro", "Tour", "Vuelta", "World", "Cup", "Edition", "Collection",
+   648→  ]);
+   649→  const matches = title.match(/\b([A-Z][a-zA-Z'’-]{2,})\b/g) || [];
+   650→  for (const m of matches) {
+   651→    if (!NON_BRAND_WORDS.has(m)) return m;
+   652→  }
+   653→  return undefined;
+   654→}
+   655→

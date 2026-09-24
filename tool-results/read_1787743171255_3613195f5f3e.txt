@@ -1,0 +1,1724 @@
+     1→     1→'use client';
+     2→     2→
+     3→     3→import { useCallback, useEffect, useMemo, useState } from "react";
+     4→     4→import { useQuery } from "@tanstack/react-query";
+     5→     5→import {
+     6→     6→  Search,
+     7→     7→  ExternalLink,
+     8→     8→  Loader2,
+     9→     9→  Download,
+    10→    10→  ShoppingCart,
+    11→    11→  Filter,
+    12→    12→  X,
+    13→    13→  TrendingDown,
+    14→    14→  CheckCircle2,
+    15→    15→  XCircle,
+    16→    16→  AlertTriangle,
+    17→    17→  Clock,
+    18→    18→  Globe,
+    19→    19→  Mountain,
+    20→    20→  ChevronDown,
+    21→    21→  ChevronUp,
+    22→    22→  Star,
+    23→    23→  Tag,
+    24→    24→  Layers,
+    25→    25→} from "lucide-react";
+    26→    26→import { Input } from "@/components/ui/input";
+    27→    27→import { Button } from "@/components/ui/button";
+    28→    28→import { Badge } from "@/components/ui/badge";
+    29→    29→import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+    30→    30→import { Label } from "@/components/ui/label";
+    31→    31→import { Checkbox } from "@/components/ui/checkbox";
+    32→    32→import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+    33→    33→import { Separator } from "@/components/ui/separator";
+    34→    34→import { Skeleton } from "@/components/ui/skeleton";
+    35→    35→import { Switch } from "@/components/ui/switch";
+    36→    36→import { ScrollArea } from "@/components/ui/scroll-area";
+    37→    37→import {
+    38→    38→  SITES,
+    39→    39→  type SiteId,
+    40→    40→  type MatchedProduct,
+    41→    41→  type ProductOffer,
+    42→    42→  type DynamicFilters,
+    43→    43→  type ShopGroup,
+    44→    44→} from "@/lib/scraper/types";
+    45→    45→import { downloadCsv } from "@/lib/csv";
+    46→    46→import { VERSION } from "@/lib/version";
+    47→    47→import { normalizeSizeValue } from "@/lib/scraper/filters";
+    48→    48→import {
+    49→    49→  DEFAULT_GROUPS,
+    50→    50→  ALL_SITE_IDS,
+    51→    51→  loadCustomGroups,
+    52→    52→  saveCustomGroups,
+    53→    53→  getSitesForGroup,
+    54→    54→} from "@/lib/scraper/groups";
+    55→    55→import {
+    56→    56→  logInfo,
+    57→    57→  logWarn,
+    58→    58→  logError,
+    59→    59→  clearLogs,
+    60→    60→  logSearchResults,
+    61→    61→  subscribeLogs,
+    62→    62→  type LogEntry,
+    63→    63→  type LogLevel,
+    64→    64→} from "@/lib/logs";
+    65→    65→
+    66→    66→type SortKey = "price_asc" | "price_desc" | "savings_desc" | "siteCount_desc" | "rating_desc";
+    67→    67→
+    68→    68→interface SiteStat {
+    69→    69→  id: SiteId;
+    70→    70→  name: string;
+    71→    71→  status: "ok" | "error" | "empty";
+    72→    72→  count: number;
+    73→    73→  durationMs?: number;
+    74→    74→  error?: string;
+    75→    75→}
+    76→    76→
+    77→    77→interface ApiResponse {
+    78→    78→  query: string;
+    79→    79→  totalProducts: number;
+    80→    80→  products: MatchedProduct[];
+    81→    81→  filters: DynamicFilters;
+    82→    82→  durationMs: number;
+    83→    83→  phases: { searchMs: number; enrichMs: number; matchMs: number };
+    84→    84→  anySuccess: boolean;
+    85→    85→  demo?: boolean;
+    86→    86→  sites: SiteStat[];
+    87→    87→}
+    88→    88→
+    89→    89→const ALL_SITE_IDS_LOCAL = ALL_SITE_IDS;
+    90→    90→
+    91→    91→const SUGGESTIONS = [
+    92→    92→  "Dynafit Speed Radical",
+    93→    93→  "Scarpa F1",
+    94→    94→  "Salomon S/Lab MTN",
+    95→    95→  "Black Diamond Helio",
+    96→    96→  "Arc'teryx Beta AR",
+    97→    97→  "Patagonia Nano Puff",
+    98→    98→  "Petzl GriGri",
+    99→    99→  "Dynafit TLT Superlite",
+   100→   100→];
+   101→   101→
+   102→   102→function formatPrice(p: number | null, currency: string): string {
+   103→   103→  if (p === null || p === undefined || Number.isNaN(p)) return "—";
+   104→   104→  if (currency === "EUR") {
+   105→   105→    return new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR" }).format(p);
+   106→   106→  }
+   107→   107→  return `${currency} ${p.toFixed(2)}`;
+   108→   108→}
+   109→   109→
+   110→   110→// Mapping nom de couleur → hex (pour swatches visuels)
+   111→   111→// Insensible casse/accents/préfixe souligné (« _Bleu » chez Ekosport).
+   112→   112→const COLOR_HEX: Record<string, string> = {
+   113→   113→  // FR
+   114→   114→  noir: "#1a1a1a", blanc: "#f8f8f8", rouge: "#dc2626", bleu: "#2563eb",
+   115→   115→  vert: "#16a34a", jaune: "#eab308", orange: "#ea580c", violet: "#7c3aed",
+   116→   116→  gris: "#6b7280", rose: "#ec4899", marron: "#7c4a1e", beige: "#d6c4a0",
+   117→   117→  kaki: "#4d5e2c", anthracite: "#2d2d2d", bordeaux: "#5b1a1a", turquoise: "#06b6d4",
+   118→   118→  crème: "#f5ecd9", ivoire: "#fffff0", sable: "#c2a878", corail: "#ff7f50",
+   119→   119→  // EN
+   120→   120→  black: "#1a1a1a", white: "#f8f8f8", red: "#dc2626", blue: "#2563eb",
+   121→   121→  green: "#16a34a", yellow: "#eab308", purple: "#7c3aed", gray: "#6b7280",
+   122→   122→  grey: "#6b7280", pink: "#ec4899", brown: "#7c4a1e", navy: "#1e3a8a",
+   123→   123→  teal: "#0d9488", olive: "#808000", gold: "#d4af37", silver: "#c0c0c0",
+   124→   124→  copper: "#b87333", bronze: "#cd7f32",
+   125→   125→  // Spécifiques outdoor
+   126→   126→  "fluo": "#ccff00", "fluorescent": "#ccff00", "neon": "#ccff00",
+   127→   127→  "out": "#1a1a1a", "balsam": "#3a5a40", "cinder": "#586065", "alabama": "#b91c1c",
+   128→   128→  "overcast": "#7c8a94", "cabana": "#2b4c7e", "storm": "#374151",
+   129→   129→  "sunset": "#f97316", "sand": "#dcb573", "ash": "#708090",
+   130→   130→};
+   131→   131→
+   132→   132→/** Normalise une couleur (supprime accents, souligné initial, pluriels simples). */
+   133→   133→function canonColor(c: string): string {
+   134→   134→  return c
+   135→   135→    .toLowerCase()
+   136→   136→    .trim()
+   137→   137→    .replace(/^_+/, "")
+   138→   138→    .normalize("NFD")
+   139→   139→    .replace(/[\u0300-\u036f]/g, "")
+   140→   140→    .replace(/s$/, ""); // marque → marques (best-effort, ne gère pas les exceptions)
+   141→   141→}
+   142→   142→
+   143→   143→/** Trouve un hex pour un libellé couleur. Tente d'abord le libellé complet,
+   144→   144→ *  puis chaque mot (ex: « fluo jaune » → jaune). */
+   145→   145→function colorToHex(label: string): string | null {
+   146→   146→  const canon = canonColor(label);
+   147→   147→  if (COLOR_HEX[canon]) return COLOR_HEX[canon];
+   148→   148→  // Tente chaque mot
+   149→   149→  for (const part of canon.split(/[\s/-]+/)) {
+   150→   150→    if (COLOR_HEX[part]) return COLOR_HEX[part];
+   151→   151→  }
+   152→   152→  return null;
+   153→   153→}
+   154→   154→
+   155→   155→function getHostname(url: string): string {
+   156→   156→  try {
+   157→   157→    return new URL(url).hostname.replace(/^www\./, "");
+   158→   158→  } catch {
+   159→   159→    return url;
+   160→   160→  }
+   161→   161→}
+   162→   162→
+   163→   163→export default function Home() {
+   164→   164→  const [query, setQuery] = useState("");
+   165→   165→  const [submittedQuery, setSubmittedQuery] = useState("");
+   166→   166→  // Groupes : par défaut "all" ; custom groups chargés depuis localStorage
+   167→   167→  // (lazy initial state — pas de useEffect, sinon lint react-hooks/set-state-in-effect)
+   168→   168→  const [groups, setGroups] = useState<ShopGroup[]>(() => {
+   169→   169→    // Côté client seulement : useState initializer ne tourne qu'au mount
+   170→   170→    if (typeof window === "undefined") return DEFAULT_GROUPS;
+   171→   171→    const custom = loadCustomGroups();
+   172→   172→    return custom.length > 0 ? [...DEFAULT_GROUPS, ...custom] : DEFAULT_GROUPS;
+   173→   173→  });
+   174→   174→  const [activeGroupId, setActiveGroupId] = useState<string>("all");
+   175→   175→  const [showGroupEditor, setShowGroupEditor] = useState(false);
+   176→   176→
+   177→   177→  // Filtres
+   178→   178→  const [sortKey, setSortKey] = useState<SortKey>("siteCount_desc");
+   179→   179→  const [onlyPromos, setOnlyPromos] = useState(false);
+   180→   180→  const [onlyInStock, setOnlyInStock] = useState(false);
+   181→   181→  const [maxPrice, setMaxPrice] = useState<number | null>(null);
+   182→   182→  const [minSites, setMinSites] = useState<number>(1);
+   183→   183→  // Filtres dynamiques dérivés des métadonnées
+   184→   184→  const [activeBrands, setActiveBrands] = useState<Set<string>>(new Set());
+   185→   185→  const [activeCategories, setActiveCategories] = useState<Set<string>>(new Set());
+   186→   186→  const [activeSubcategories, setActiveSubcategories] = useState<Set<string>>(new Set());
+   187→   187→  const [activeSports, setActiveSports] = useState<Set<string>>(new Set());
+   188→   188→  const [activeRanges, setActiveRanges] = useState<Set<string>>(new Set());
+   189→   189→  const [activeGenders, setActiveGenders] = useState<Set<string>>(new Set());
+   190→   190→  const [activeColors, setActiveColors] = useState<Set<string>>(new Set());
+   191→   191→  const [activeSizes, setActiveSizes] = useState<Set<string>>(new Set());
+   192→   192→  const [showDebug, setShowDebug] = useState(false);
+   193→   193→
+   194→   194→  // --- Groupes & sites sélectionnés (déclarés AVANT useQuery) ---
+   195→   195→  // userOff stores the user's "off" overrides — sites the user has deselected.
+   196→   196→  // On le vide à chaque changement de groupe via selectGroup.
+   197→   197→  const [userOff, setUserOff] = useState<Set<SiteId>>(new Set());
+   198→   198→
+   199→   199→  // Sites du groupe actif (ou tous les sites si "all")
+   200→   200→  const computedGroupSites: SiteId[] = (() => {
+   201→   201→    if (activeGroupId === "all") return ALL_SITE_IDS;
+   202→   202→    const group = groups.find((g) => g.id === activeGroupId);
+   203→   203→    if (!group) return ALL_SITE_IDS;
+   204→   204→    return group.sites.filter((s) => ALL_SITE_IDS.includes(s));
+   205→   205→  })();
+   206→   206→
+   207→   207→  // Sites effectivement sélectionnés : tous les sites du groupe, moins ceux
+   208→   208→  // que l'utilisateur a désélectionnés manuellement.
+   209→   209→  const selectedSites: SiteId[] = computedGroupSites.filter((id) => !userOff.has(id));
+   210→   210→
+   211→   211→  const toggleSite = (id: SiteId) => {
+   212→   212→    setUserOff((prev) => {
+   213→   213→      const next = new Set(prev);
+   214→   214→      if (next.has(id)) next.delete(id);
+   215→   215→      else next.add(id);
+   216→   216→      return next;
+   217→   217→    });
+   218→   218→  };
+   219→   219→
+   220→   220→  /** Bascule sur un groupe : met à jour activeGroupId et reset userOff. */
+   221→   221→  const selectGroup = (groupId: string) => {
+   222→   222→    setActiveGroupId(groupId);
+   223→   223→    setUserOff(new Set());
+   224→   224→  };
+   225→   225→
+   226→   226→  /** Persiste les groupes custom dans localStorage. */
+   227→   227→  function persistGroups(next: ShopGroup[]) {
+   228→   228→    setGroups(next);
+   229→   229→    saveCustomGroups(next);
+   230→   230→  }
+   231→   231→
+   232→   232→  const { data, isLoading, isFetching, refetch } = useQuery<ApiResponse>({
+   233→   233→    queryKey: ["search", submittedQuery, selectedSites, activeGroupId],
+   234→   234→    queryFn: async () => {
+   235→   235→      // En-tête X-Custom-Groups : base64 JSON des groupes custom pour que
+   236→   236→      // l'API puisse filtrer par groupe côté serveur.
+   237→   237→      const customGroups = groups.filter((g) => !g.builtin);
+   238→   238→      const headerValue = customGroups.length > 0
+   239→   239→        ? btoa(unescape(encodeURIComponent(JSON.stringify(customGroups))))
+   240→   240→        : "";
+   241→   241→      const res = await fetch("/api/search", {
+   242→   242→        method: "POST",
+   243→   243→        headers: {
+   244→   244→          "Content-Type": "application/json",
+   245→   245→          ...(headerValue ? { "X-Custom-Groups": headerValue } : {}),
+   246→   246→        },
+   247→   247→        body: JSON.stringify({
+   248→   248→          query: submittedQuery,
+   249→   249→          onlySites: selectedSites,
+   250→   250→          group: activeGroupId !== "all" ? activeGroupId : undefined,
+   251→   251→        }),
+   252→   252→      });
+   253→   253→      if (!res.ok) {
+   254→   254→        logError(undefined, `API HTTP ${res.status} pour la requête "${submittedQuery}"`);
+   255→   255→        throw new Error(`HTTP ${res.status}`);
+   256→   256→      }
+   257→   257→      const data = await res.json();
+   258→   258→      // Log les statuts par site
+   259→   259→      if (data?.sites) {
+   260→   260→        logSearchResults(data.sites);
+   261→   261→      }
+   262→   262→      return data;
+   263→   263→    },
+   264→   264→    enabled: submittedQuery.length >= 2,
+   265→   265→    staleTime: 60_000,
+   266→   266→  });
+   267→   267→
+   268→   268→  // Subscribe au log buffer
+   269→   269→  const [logs, setLogs] = useState<LogEntry[]>([]);
+   270→   270→  useEffect(() => {
+   271→   271→    const unsub = subscribeLogs((next) => setLogs(next));
+   272→   272→    return unsub;
+   273→   273→  }, []);
+   274→   274→
+   275→   275→  const onSubmit = useCallback(
+   276→   276→    (e?: React.FormEvent) => {
+   277→   277→      e?.preventDefault();
+   278→   278→      const q = query.trim();
+   279→   279→      if (q.length < 2) return;
+   280→   280→      setSubmittedQuery(q);
+   281→   281→      // Réinitialise les filtres dynamiques à chaque nouvelle recherche
+   282→   282→      setActiveBrands(new Set());
+   283→   283→      setActiveCategories(new Set());
+   284→   284→      setActiveSubcategories(new Set());
+   285→   285→      setActiveSports(new Set());
+   286→   286→      setActiveRanges(new Set());
+   287→   287→      setActiveGenders(new Set());
+   288→   288→      setActiveColors(new Set());
+   289→   289→      setActiveSizes(new Set());
+   290→   290→      refetch();
+   291→   291→    },
+   292→   292→    [query, refetch]
+   293→   293→  );
+   294→   294→
+   295→   295→  const toggleSet = (setter: React.Dispatch<React.SetStateAction<Set<string>>>) => (v: string) => {
+   296→   296→    setter((prev) => {
+   297→   297→      const next = new Set(prev);
+   298→   298→      if (next.has(v)) next.delete(v);
+   299→   299→      else next.add(v);
+   300→   300→      return next;
+   301→   301→    });
+   302→   302→  };
+   303→   303→
+   304→   304→  const filtered = useMemo<MatchedProduct[]>(() => {
+   305→   305→    if (!data) return [];
+   306→   306→    let list = data.products;
+   307→   307→    if (onlyPromos) list = list.filter((p) => p.offers.some((o) => (o.discount ?? 0) > 0));
+   308→   308→    if (onlyInStock) list = list.filter((p) => p.offers.some((o) => o.availability !== "out_of_stock"));
+   309→   309→    if (maxPrice !== null)
+   310→   310→      list = list.filter((p) => p.minPrice !== null && p.minPrice <= maxPrice);
+   311→   311→    if (minSites > 1) list = list.filter((p) => p.siteCount >= minSites);
+   312→   312→    if (activeBrands.size > 0) list = list.filter((p) => p.brand && activeBrands.has(p.brand));
+   313→   313→    if (activeCategories.size > 0)
+   314→   314→      list = list.filter((p) => p.category && activeCategories.has(p.category));
+   315→   315→    if (activeSubcategories.size > 0)
+   316→   316→      list = list.filter((p) => p.subcategory && activeSubcategories.has(p.subcategory));
+   317→   317→    if (activeSports.size > 0)
+   318→   318→      list = list.filter((p) => p.sport && activeSports.has(p.sport));
+   319→   319→    if (activeRanges.size > 0)
+   320→   320→      list = list.filter((p) => p.range && activeRanges.has(p.range));
+   321→   321→    if (activeGenders.size > 0)
+   322→   322→      list = list.filter((p) => p.metadata.gender && activeGenders.has(p.metadata.gender));
+   323→   323→    if (activeColors.size > 0) {
+   324→   324→      list = list.filter((p) =>
+   325→   325→        (p.metadata.color ?? []).some((c) => activeColors.has(c.toLowerCase()))
+   326→   326→      );
+   327→   327→    }
+   328→   328→    if (activeSizes.size > 0) {
+   329→   329→      list = list.filter((p) =>
+   330→   330→        (p.metadata.sizes ?? []).some((s) => activeSizes.has(s))
+   331→   331→      );
+   332→   332→    }
+   333→   333→
+   334→   334→    const sorted = [...list];
+   335→   335→    switch (sortKey) {
+   336→   336→      case "price_asc":
+   337→   337→        sorted.sort((a, b) => (a.minPrice ?? Infinity) - (b.minPrice ?? Infinity));
+   338→   338→        break;
+   339→   339→      case "price_desc":
+   340→   340→        sorted.sort((a, b) => (b.minPrice ?? -Infinity) - (a.minPrice ?? -Infinity));
+   341→   341→        break;
+   342→   342→      case "savings_desc":
+   343→   343→        sorted.sort((a, b) => (b.savings ?? 0) - (a.savings ?? 0));
+   344→   344→        break;
+   345→   345→      case "siteCount_desc":
+   346→   346→        sorted.sort((a, b) => b.siteCount - a.siteCount);
+   347→   347→        break;
+   348→   348→      case "rating_desc":
+   349→   349→        sorted.sort((a, b) => (b.metadata.rating ?? 0) - (a.metadata.rating ?? 0));
+   350→   350→        break;
+   351→   351→    }
+   352→   352→    return sorted;
+   353→   353→  }, [data, onlyPromos, onlyInStock, maxPrice, minSites, activeBrands, activeCategories, activeSubcategories, activeSports, activeRanges, activeGenders, activeColors, activeSizes, sortKey]);
+   354→   354→
+   355→   355→  const statsBySite = useMemo(() => {
+   356→   356→    const map = new Map<SiteId, SiteStat>();
+   357→   357→    ALL_SITE_IDS.forEach((id) =>
+   358→   358→      map.set(id, { id, name: SITES[id].name, status: "empty", count: 0 })
+   359→   359→    );
+   360→   360→    if (data?.sites) {
+   361→   361→      for (const s of data.sites) map.set(s.id, s);
+   362→   362→    }
+   363→   363→    return map;
+   364→   364→  }, [data]);
+   365→   365→
+   366→   366→  const cheapestOverall = useMemo(() => {
+   367→   367→    const withPrice = filtered.filter((p) => p.minPrice !== null);
+   368→   368→    if (withPrice.length === 0) return null;
+   369→   369→    return withPrice.reduce((min, p) =>
+   370→   370→      (p.minPrice ?? Infinity) < (min.minPrice ?? Infinity) ? p : min
+   371→   371→    );
+   372→   372→  }, [filtered]);
+   373→   373→
+   374→   374→  const handleSuggestion = (s: string) => {
+   375→   375→    setQuery(s);
+   376→   376→    setSubmittedQuery(s);
+   377→   377→    setActiveBrands(new Set());
+   378→   378→    setActiveCategories(new Set());
+   379→   379→    setActiveSubcategories(new Set());
+   380→   380→    setActiveSports(new Set());
+   381→   381→    setActiveRanges(new Set());
+   382→   382→    setActiveGenders(new Set());
+   383→   383→    setActiveColors(new Set());
+   384→   384→    setActiveSizes(new Set());
+   385→   385→    refetch();
+   386→   386→  };
+   387→   387→
+   388→   388→  const activeFilterCount =
+   389→   389→    activeBrands.size +
+   390→   390→    activeCategories.size +
+   391→   391→    activeSubcategories.size +
+   392→   392→    activeSports.size +
+   393→   393→    activeRanges.size +
+   394→   394→    activeGenders.size +
+   395→   395→    activeColors.size +
+   396→   396→    activeSizes.size +
+   397→   397→    (onlyPromos ? 1 : 0) +
+   398→   398→    (onlyInStock ? 1 : 0) +
+   399→   399→    (maxPrice !== null ? 1 : 0) +
+   400→   400→    (minSites > 1 ? 1 : 0);
+   401→   401→
+   402→   402→  const resetFilters = () => {
+   403→   403→    setActiveBrands(new Set());
+   404→   404→    setActiveCategories(new Set());
+   405→   405→    setActiveSubcategories(new Set());
+   406→   406→    setActiveSports(new Set());
+   407→   407→    setActiveRanges(new Set());
+   408→   408→    setActiveGenders(new Set());
+   409→   409→    setActiveColors(new Set());
+   410→   410→    setActiveSizes(new Set());
+   411→   411→    setOnlyPromos(false);
+   412→   412→    setOnlyInStock(false);
+   413→   413→    setMaxPrice(null);
+   414→   414→    setMinSites(1);
+   415→   415→  };
+   416→   416→
+   417→   417→  return (
+   418→   418→    <div className="min-h-screen flex flex-col bg-stone-50 text-stone-900 pb-10">
+   419→   419→      {/* Header */}
+   420→   420→      <header className="sticky top-0 z-30 border-b border-stone-200 bg-white/90 backdrop-blur supports-[backdrop-filter]:bg-white/70">
+   421→   421→        <div className="mx-auto max-w-7xl px-4 py-3 flex items-center gap-3">
+   422→   422→          <div className="flex items-center gap-2">
+   423→   423→            <div className="grid place-items-center h-9 w-9 rounded-lg bg-stone-900 text-white">
+   424→   424→              <Mountain className="h-5 w-5" />
+   425→   425→            </div>
+   426→   426→            <div className="leading-tight">
+   427→   427→              <div className="font-semibold tracking-tight">
+   428→   428→                OutdoorPrice
+   429→   429→                <span className="ml-1.5 font-mono text-[10px] font-normal text-stone-400 align-middle">v{VERSION}</span>
+   430→   430→              </div>
+   431→   431→              <div className="text-[11px] text-stone-500 -mt-0.5">
+   432→   432→                Comparateur cross-site · matching produits
+   433→   433→              </div>
+   434→   434→            </div>
+   435→   435→          </div>
+   436→   436→          <form onSubmit={onSubmit} className="ml-auto flex items-center gap-2 flex-1 max-w-xl">
+   437→   437→            <div className="relative flex-1">
+   438→   438→              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-stone-400" />
+   439→   439→              <Input
+   440→   440→                value={query}
+   441→   441→                onChange={(e) => setQuery(e.target.value)}
+   442→   442→                placeholder="Rechercher un produit (ex. Dynafit Speed Radical)"
+   443→   443→                className="pl-9 bg-white"
+   444→   444→                aria-label="Recherche produit"
+   445→   445→              />
+   446→   446→            </div>
+   447→   447→            <Button type="submit" disabled={query.trim().length < 2 || isFetching}>
+   448→   448→              {isFetching ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
+   449→   449→              <span className="hidden sm:inline ml-1">Comparer</span>
+   450→   450→            </Button>
+   451→   451→          </form>
+   452→   452→        </div>
+   453→   453→        {submittedQuery && (
+   454→   454→          <div className="mx-auto max-w-7xl px-4 pb-3 -mt-1 flex flex-wrap gap-2 items-center text-xs">
+   455→   455→            <span className="text-stone-500">Suggestions :</span>
+   456→   456→            {SUGGESTIONS.slice(0, 6).map((s) => (
+   457→   457→              <button
+   458→   458→                key={s}
+   459→   459→                onClick={() => handleSuggestion(s)}
+   460→   460→                className="px-2 py-1 rounded-full bg-stone-100 hover:bg-stone-200 transition border border-stone-200 text-stone-700"
+   461→   461→              >
+   462→   462→                {s}
+   463→   463→              </button>
+   464→   464→            ))}
+   465→   465→          </div>
+   466→   466→        )}
+   467→   467→        {/* Group selector — sous-header sticky */}
+   468→   468→        <div className="border-b border-stone-200 bg-white">
+   469→   469→          <div className="mx-auto max-w-7xl px-4 py-2 flex items-center gap-2 flex-wrap">
+   470→   470→            <span className="text-[11px] uppercase tracking-wide text-stone-500 mr-1">
+   471→   471→              Univers :
+   472→   472→            </span>
+   473→   473→            {groups.map((g) => {
+   474→   474→              const isActive = g.id === activeGroupId;
+   475→   475→              return (
+   476→   476→                <button
+   477→   477→                  key={g.id}
+   478→   478→                  onClick={() => selectGroup(g.id)}
+   479→   479→                  className={`px-2.5 py-1 rounded-full text-xs border transition flex items-center gap-1.5 ${
+   480→   480→                    isActive
+   481→   481→                      ? "bg-stone-900 text-white border-stone-900"
+   482→   482→                      : `bg-white text-stone-700 border-stone-200 hover:border-stone-400 ${g.accent ?? ""}`
+   483→   483→                  }`}
+   484→   484→                  title={g.description ?? g.name}
+   485→   485→                >
+   486→   486→                  {g.icon && <span className="text-[13px]">{g.icon}</span>}
+   487→   487→                  <span className="font-medium">{g.name}</span>
+   488→   488→                  <span className={`text-[10px] ${isActive ? "opacity-70" : "opacity-60"}`}>
+   489→   489→                    ({g.sites.length})
+   490→   490→                  </span>
+   491→   491→                </button>
+   492→   492→              );
+   493→   493→            })}
+   494→   494→            <button
+   495→   495→              onClick={() => setShowGroupEditor(true)}
+   496→   496→              className="ml-auto px-2 py-1 rounded-full text-[11px] text-stone-600 hover:bg-stone-100 transition border border-stone-200"
+   497→   497→              title="Gérer les groupes (matrix view)"
+   498→   498→            >
+   499→   499→              Gérer les groupes
+   500→   500→            </button>
+   501→   501→          </div>
+   502→   502→          {showGroupEditor && (
+   503→   503→            <GroupMatrixModal
+   504→   504→              groups={groups}
+   505→   505→              onGroupsChange={persistGroups}
+   506→   506→              onClose={() => setShowGroupEditor(false)}
+   507→   507→            />
+   508→   508→          )}
+   509→   509→        </div>
+   510→   510→      </header>
+   511→   511→
+   512→   512→      <main className="mx-auto max-w-7xl w-full px-4 py-6 flex-1 grid grid-cols-1 lg:grid-cols-[280px_1fr] gap-6">
+   513→   513→        {/* Sidebar filtres */}
+   514→   514→        <aside className="space-y-4 lg:sticky lg:top-[120px] lg:self-start lg:max-h-[calc(100vh-140px)] lg:overflow-y-auto pr-1">
+   515→   515→          <Card>
+   516→   516→            <CardHeader className="pb-3">
+   517→   517→              <div className="flex items-center justify-between">
+   518→   518→                <CardTitle className="text-sm flex items-center gap-2">
+   519→   519→                  <Filter className="h-4 w-4" /> Filtres
+   520→   520→                  {activeFilterCount > 0 && (
+   521→   521→                    <Badge variant="secondary" className="text-[10px]">
+   522→   522→                      {activeFilterCount}
+   523→   523→                    </Badge>
+   524→   524→                  )}
+   525→   525→                </CardTitle>
+   526→   526→                {activeFilterCount > 0 && (
+   527→   527→                  <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={resetFilters}>
+   528→   528→                    <X className="h-3 w-3 mr-1" /> Effacer
+   529→   529→                  </Button>
+   530→   530→                )}
+   531→   531→              </div>
+   532→   532→            </CardHeader>
+   533→   533→            <CardContent className="space-y-4">
+   534→   534→              {/* Active filter balloons */}
+   535→   535→              {activeFilterCount > 0 && (
+   536→   536→                <div className="flex flex-wrap gap-1.5 pb-2 border-b border-stone-100">
+   537→   537→                  {Array.from(activeBrands).map((v) => (
+   538→   538→                    <FilterBalloon key={`brand-${v}`} label={v} onRemove={() => toggleSet(setActiveBrands)(v)} />
+   539→   539→                  ))}
+   540→   540→                  {Array.from(activeCategories).map((v) => (
+   541→   541→                    <FilterBalloon key={`cat-${v}`} label={v} onRemove={() => toggleSet(setActiveCategories)(v)} />
+   542→   542→                  ))}
+   543→   543→                  {Array.from(activeSubcategories).map((v) => (
+   544→   544→                    <FilterBalloon key={`subcat-${v}`} label={v} onRemove={() => toggleSet(setActiveSubcategories)(v)} />
+   545→   545→                  ))}
+   546→   546→                  {Array.from(activeSports).map((v) => (
+   547→   547→                    <FilterBalloon key={`sport-${v}`} label={v} onRemove={() => toggleSet(setActiveSports)(v)} />
+   548→   548→                  ))}
+   549→   549→                  {Array.from(activeRanges).map((v) => (
+   550→   550→                    <FilterBalloon key={`range-${v}`} label={v} onRemove={() => toggleSet(setActiveRanges)(v)} />
+   551→   551→                  ))}
+   552→   552→                  {Array.from(activeGenders).map((v) => (
+   553→   553→                    <FilterBalloon key={`gender-${v}`} label={v} onRemove={() => toggleSet(setActiveGenders)(v)} />
+   554→   554→                  ))}
+   555→   555→                  {Array.from(activeColors).map((v) => (
+   556→   556→                    <FilterBalloon key={`color-${v}`} label={v} onRemove={() => toggleSet(setActiveColors)(v)} />
+   557→   557→                  ))}
+   558→   558→                  {Array.from(activeSizes).map((v) => (
+   559→   559→                    <FilterBalloon key={`size-${v}`} label={v} onRemove={() => toggleSet(setActiveSizes)(v)} />
+   560→   560→                  ))}
+   561→   561→                  {onlyPromos && (
+   562→   562→                    <FilterBalloon label="Promos" onRemove={() => setOnlyPromos(false)} />
+   563→   563→                  )}
+   564→   564→                  {onlyInStock && (
+   565→   565→                    <FilterBalloon label="En stock" onRemove={() => setOnlyInStock(false)} />
+   566→   566→                  )}
+   567→   567→                  {maxPrice !== null && (
+   568→   568→                    <FilterBalloon label={`Max ${maxPrice}€`} onRemove={() => setMaxPrice(null)} />
+   569→   569→                  )}
+   570→   570→                  {minSites > 1 && (
+   571→   571→                    <FilterBalloon label={`Min ${minSites} sites`} onRemove={() => setMinSites(1)} />
+   572→   572→                  )}
+   573→   573→                </div>
+   574→   574→              )}
+   575→   575→              <div>
+   576→   576→                <Label className="text-xs text-stone-500">Tri</Label>
+   577→   577→                <Select value={sortKey} onValueChange={(v) => setSortKey(v as SortKey)}>
+   578→   578→                  <SelectTrigger className="mt-1">
+   579→   579→                    <SelectValue />
+   580→   580→                  </SelectTrigger>
+   581→   581→                  <SelectContent>
+   582→   582→                    <SelectItem value="siteCount_desc">Plus de sites</SelectItem>
+   583→   583→                    <SelectItem value="price_asc">Prix croissant</SelectItem>
+   584→   584→                    <SelectItem value="price_desc">Prix décroissant</SelectItem>
+   585→   585→                    <SelectItem value="savings_desc">Économie max</SelectItem>
+   586→   586→                    <SelectItem value="rating_desc">Mieux notés</SelectItem>
+   587→   587→                  </SelectContent>
+   588→   588→                </Select>
+   589→   589→              </div>
+   590→   590→
+   591→   591→              <Separator />
+   592→   592→
+   593→   593→              <div className="space-y-2">
+   594→   594→                <Label className="text-xs text-stone-500">Affichage</Label>
+   595→   595→                <div className="flex items-center justify-between">
+   596→   596→                  <span className="text-sm">Promos uniquement</span>
+   597→   597→                  <Switch checked={onlyPromos} onCheckedChange={setOnlyPromos} />
+   598→   598→                </div>
+   599→   599→                <div className="flex items-center justify-between">
+   600→   600→                  <span className="text-sm">En stock uniquement</span>
+   601→   601→                  <Switch checked={onlyInStock} onCheckedChange={setOnlyInStock} />
+   602→   602→                </div>
+   603→   603→              </div>
+   604→   604→
+   605→   605→              <Separator />
+   606→   606→
+   607→   607→              <div className="space-y-2">
+   608→   608→                <Label className="text-xs text-stone-500">Prix maximum</Label>
+   609→   609→                <div className="flex items-center gap-2">
+   610→   610→                  <Input
+   611→   611→                    type="number"
+   612→   612→                    min={0}
+   613→   613→                    placeholder="€"
+   614→   614→                    value={maxPrice ?? ""}
+   615→   615→                    onChange={(e) => setMaxPrice(e.target.value ? Number(e.target.value) : null)}
+   616→   616→                    className="bg-white"
+   617→   617→                  />
+   618→   618→                  {maxPrice !== null && (
+   619→   619→                    <Button variant="ghost" size="sm" onClick={() => setMaxPrice(null)}>
+   620→   620→                      <X className="h-3 w-3" />
+   621→   621→                    </Button>
+   622→   622→                  )}
+   623→   623→                </div>
+   624→   624→              </div>
+   625→   625→
+   626→   626→              <div className="space-y-2">
+   627→   627→                <Label className="text-xs text-stone-500">
+   628→   628→                  Sites proposant le produit : min {minSites}
+   629→   629→                </Label>
+   630→   630→                <input
+   631→   631→                  type="range"
+   632→   632→                  min={1}
+   633→   633→                  max={9}
+   634→   634→                  value={minSites}
+   635→   635→                  onChange={(e) => setMinSites(Number(e.target.value))}
+   636→   636→                  className="w-full accent-stone-900"
+   637→   637→                />
+   638→   638→              </div>
+   639→   639→
+   640→   640→              <Separator />
+   641→   641→
+   642→   642→              {/* Export CSV */}
+   643→   643→              {filtered.length > 0 && (
+   644→   644→                <div>
+   645→   645→                  <Button
+   646→   646→                    variant="outline"
+   647→   647→                    size="sm"
+   648→   648→                    className="w-full"
+   649→   649→                    onClick={() => downloadCsv(filtered)}
+   650→   650→                  >
+   651→   651→                    <Download className="h-3.5 w-3.5 mr-1.5" />
+   652→   652→                    Exporter CSV ({filtered.length} produits)
+   653→   653→                  </Button>
+   654→   654→                </div>
+   655→   655→              )}
+   656→   656→
+   657→   657→              <Separator />
+   658→   658→              {data && data.filters.brands.length > 0 && (
+   659→   659→                <FilterSection
+   660→   660→                  title="Marques"
+   661→   661→                  icon={<Tag className="h-3.5 w-3.5" />}
+   662→   662→                  options={data.filters.brands}
+   663→   663→                  active={activeBrands}
+   664→   664→                  onToggle={toggleSet(setActiveBrands)}
+   665→   665→                />
+   666→   666→              )}
+   667→   667→
+   668→   668→              {/* Filtres dynamiques : sports */}
+   669→   669→              {data && data.filters.sports.length > 0 && (
+   670→   670→                <FilterSection
+   671→   671→                  title="Sports"
+   672→   672→                  icon={<Mountain className="h-3.5 w-3.5" />}
+   673→   673→                  options={data.filters.sports}
+   674→   674→                  active={activeSports}
+   675→   675→                  onToggle={toggleSet(setActiveSports)}
+   676→   676→                />
+   677→   677→              )}
+   678→   678→
+   679→   679→              {/* Filtres dynamiques : catégories */}
+   680→   680→              {data && data.filters.categories.length > 0 && (
+   681→   681→                <FilterSection
+   682→   682→                  title="Catégories"
+   683→   683→                  icon={<Layers className="h-3.5 w-3.5" />}
+   684→   684→                  options={data.filters.categories}
+   685→   685→                  active={activeCategories}
+   686→   686→                  onToggle={toggleSet(setActiveCategories)}
+   687→   687→                />
+   688→   688→              )}
+   689→   689→
+   690→   690→              {/* Filtres dynamiques : sous-catégories */}
+   691→   691→              {data && data.filters.subcategories.length > 0 && (
+   692→   692→                <FilterSection
+   693→   693→                  title="Sous-catégories"
+   694→   694→                  icon={<Layers className="h-3.5 w-3.5" />}
+   695→   695→                  options={data.filters.subcategories}
+   696→   696→                  active={activeSubcategories}
+   697→   697→                  onToggle={toggleSet(setActiveSubcategories)}
+   698→   698→                />
+   699→   699→              )}
+   700→   700→
+   701→   701→              {/* Filtres dynamiques : gamme */}
+   702→   702→              {data && data.filters.ranges.length > 0 && (
+   703→   703→                <FilterSection
+   704→   704→                  title="Gamme"
+   705→   705→                  icon={<Star className="h-3.5 w-3.5" />}
+   706→   706→                  options={data.filters.ranges}
+   707→   707→                  active={activeRanges}
+   708→   708→                  onToggle={toggleSet(setActiveRanges)}
+   709→   709→                />
+   710→   710→              )}
+   711→   711→
+   712→   712→              {/* Filtres dynamiques : genre */}
+   713→   713→              {data && data.filters.genders.length > 0 && (
+   714→   714→                <FilterSection
+   715→   715→                  title="Genre"
+   716→   716→                  icon={<Star className="h-3.5 w-3.5" />}
+   717→   717→                  options={data.filters.genders}
+   718→   718→                  active={activeGenders}
+   719→   719→                  onToggle={toggleSet(setActiveGenders)}
+   720→   720→                />
+   721→   721→              )}
+   722→   722→
+   723→   723→              {/* Filtres dynamiques : couleurs */}
+   724→   724→              {data && data.filters.colors.length > 0 && (
+   725→   725→                <FilterSection
+   726→   726→                  title="Couleurs"
+   727→   727→                  icon={<Star className="h-3.5 w-3.5" />}
+   728→   728→                  options={data.filters.colors}
+   729→   729→                  active={activeColors}
+   730→   730→                  onToggle={toggleSet(setActiveColors)}
+   731→   731→                />
+   732→   732→              )}
+   733→   733→
+   734→   734→              {/* Filtres dynamiques : tailles */}
+   735→   735→              {data && data.filters.sizes.length > 0 && (
+   736→   736→                <FilterSection
+   737→   737→                  title="Tailles"
+   738→   738→                  icon={<Star className="h-3.5 w-3.5" />}
+   739→   739→                  options={data.filters.sizes}
+   740→   740→                  active={activeSizes}
+   741→   741→                  onToggle={toggleSet(setActiveSizes)}
+   742→   742→                />
+   743→   743→              )}
+   744→   744→
+   745→   745→              <Separator />
+   746→   746→
+   747→   747→              <div>
+   748→   748→                <Label className="text-xs text-stone-500">
+   749→   749→                  Sites ({selectedSites.length}/{ALL_SITE_IDS.length})
+   750→   750→                </Label>
+   751→   751→                <div className="mt-2 space-y-2 max-h-72 overflow-y-auto pr-1">
+   752→   752→                  {ALL_SITE_IDS.map((id) => {
+   753→   753→                    const meta = SITES[id];
+   754→   754→                    const stat = statsBySite.get(id);
+   755→   755→                    return (
+   756→   756→                      <label
+   757→   757→                        key={id}
+   758→   758→                        className="flex items-start gap-2 cursor-pointer rounded-md p-1 hover:bg-stone-50"
+   759→   759→                      >
+   760→   760→                        <Checkbox
+   761→   761→                          checked={selectedSites.includes(id)}
+   762→   762→                          onCheckedChange={() => toggleSite(id)}
+   763→   763→                          className="mt-0.5"
+   764→   764→                        />
+   765→   765→                        <div className="flex-1 min-w-0">
+   766→   766→                          <div className="flex items-center gap-2">
+   767→   767→                            <span className="text-sm font-medium truncate">{meta.name}</span>
+   768→   768→                            <Badge variant="outline" className={`text-[10px] px-1.5 py-0 ${meta.accent}`}>
+   769→   769→                              {meta.country}
+   770→   770→                            </Badge>
+   771→   771→                          </div>
+   772→   772→                          <div className="text-[11px] text-stone-500 flex items-center gap-2">
+   773→   773→                            {stat && stat.count > 0 ? (
+   774→   774→                              <span>{stat.count} produits</span>
+   775→   775→                            ) : (
+   776→   776→                              <span className="text-stone-400">
+   777→   777→                                {stat?.status === "error" ? "erreur" : stat?.status === "empty" ? "0 résultat" : "—"}
+   778→   778→                              </span>
+   779→   779→                            )}
+   780→   780→                            {stat?.durationMs ? (
+   781→   781→                              <span className="text-stone-400">{(stat.durationMs / 1000).toFixed(1)}s</span>
+   782→   782→                            ) : null}
+   783→   783→                          </div>
+   784→   784→                        </div>
+   785→   785→                      </label>
+   786→   786→                    );
+   787→   787→                  })}
+   788→   788→                </div>
+   789→   789→                <div className="flex gap-2 mt-2">
+   790→   790→                  <Button
+   791→   791→                    variant="outline"
+   792→   792→                    size="sm"
+   793→   793→                    className="flex-1 h-7 text-xs"
+   794→   794→                    onClick={() => setUserOff(new Set())}
+   795→   795→                  >
+   796→   796→                    Tout
+   797→   797→                  </Button>
+   798→   798→                  <Button
+   799→   799→                    variant="outline"
+   800→   800→                    size="sm"
+   801→   801→                    className="flex-1 h-7 text-xs"
+   802→   802→                    onClick={() => setUserOff(new Set(computedGroupSites))}
+   803→   803→                  >
+   804→   804→                    Aucun
+   805→   805→                  </Button>
+   806→   806→                </div>
+   807→   807→              </div>
+   808→   808→            </CardContent>
+   809→   809→          </Card>
+   810→   810→        </aside>
+   811→   811→
+   812→   812→        {/* Contenu principal */}
+   813→   813→        <section className="space-y-4 min-w-0">
+   814→   814→          {!submittedQuery && <EmptyState onSuggestion={handleSuggestion} />}
+   815→   815→
+   816→   816→          {submittedQuery && isLoading && <LoadingState />}
+   817→   817→
+   818→   818→          {submittedQuery && data && (
+   819→   819→            <>
+   820→   820→              {/* Bandeau résumé */}
+   821→   821→              <Card>
+   822→   822→                <CardContent className="p-4">
+   823→   823→                  <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
+   824→   824→                    <div>
+   825→   825→                      <div className="text-[11px] uppercase tracking-wide text-stone-500">Requête</div>
+   826→   826→                      <div className="font-semibold truncate max-w-[220px]">“{data.query}”</div>
+   827→   827→                    </div>
+   828→   828→                    <div>
+   829→   829→                      <div className="text-[11px] uppercase tracking-wide text-stone-500">Produits matchés</div>
+   830→   830→                      <div className="font-semibold">{data.totalProducts}</div>
+   831→   831→                    </div>
+   832→   832→                    <div>
+   833→   833→                      <div className="text-[11px] uppercase tracking-wide text-stone-500">Sites répondants</div>
+   834→   834→                      <div className="font-semibold">
+   835→   835→                        {data.sites.filter((s) => s.status === "ok").length} / {data.sites.length}
+   836→   836→                      </div>
+   837→   837→                    </div>
+   838→   838→                    <div>
+   839→   839→                      <div className="text-[11px] uppercase tracking-wide text-stone-500">Phases</div>
+   840→   840→                      <div className="text-xs font-medium text-stone-700">
+   841→   841→                        <span title="Recherche">🔎 {(data.phases.searchMs / 1000).toFixed(1)}s</span>
+   842→   842→                        {" · "}
+   843→   843→                        <span title="Enrichissement pages produits">📄 {(data.phases.enrichMs / 1000).toFixed(1)}s</span>
+   844→   844→                        {" · "}
+   845→   845→                        <span title="Matching cross-site">🔗 {(data.phases.matchMs / 1000).toFixed(2)}s</span>
+   846→   846→                      </div>
+   847→   847→                    </div>
+   848→   848→                    <div>
+   849→   849→                      <div className="text-[11px] uppercase tracking-wide text-stone-500">Durée totale</div>
+   850→   850→                      <div className="font-semibold flex items-center gap-1">
+   851→   851→                        <Clock className="h-3 w-3" />
+   852→   852→                        {(data.durationMs / 1000).toFixed(2)}s
+   853→   853→                      </div>
+   854→   854→                    </div>
+   855→   855→                    {cheapestOverall && (
+   856→   856→                      <div className="ml-auto">
+   857→   857→                        <div className="text-[11px] uppercase tracking-wide text-stone-500">Moins cher</div>
+   858→   858→                        <div className="font-semibold text-emerald-700 flex items-center gap-1">
+   859→   859→                          <TrendingDown className="h-3 w-3" />
+   860→   860→                          {formatPrice(cheapestOverall.minPrice, cheapestOverall.minCurrency)}
+   861→   861→                          <span className="text-[11px] font-normal text-stone-500">
+   862→   862→                            @ {cheapestOverall.brand ?? cheapestOverall.title.slice(0, 24)}
+   863→   863→                          </span>
+   864→   864→                        </div>
+   865→   865→                      </div>
+   866→   866→                    )}
+   867→   867→                  </div>
+   868→   868→
+   869→   869→                  {/* Groupe vide : message informatif */}
+   870→   870→                  {activeGroupId !== "all" && computedGroupSites.length === 0 && (
+   871→   871→                    <div className="mt-3 flex items-start gap-2 rounded-md bg-amber-50 border border-amber-200 p-3 text-xs text-amber-900">
+   872→   872→                      <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />
+   873→   873→                      <div>
+   874→   874→                        <strong>Groupe « {groups.find((g) => g.id === activeGroupId)?.name} » vide.</strong>
+   875→   875→                        {" "}Ce groupe ne contient actuellement aucune boutique. Ajoutez des boutiques
+   876→   876→                        via les plugins correspondants, ou créez un groupe personnalisé avec les
+   877→   877→                        boutiques existantes en cliquant sur « + Groupe ».
+   878→   878→                      </div>
+   879→   879→                    </div>
+   880→   880→                  )}
+   881→   881→
+   882→   882→                  <div className="mt-3 flex flex-wrap gap-2">
+   883→   883→                    {data.sites.map((s) => (
+   884→   884→                      <Badge
+   885→   885→                        key={s.id}
+   886→   886→                        variant="outline"
+   887→   887→                        className={`py-1.5 px-2.5 gap-1.5 ${SITES[s.id].accent} ${s.status === "ok" ? "" : "opacity-60"}`}
+   888→   888→                      >
+   889→   889→                        {s.status === "ok" && <CheckCircle2 className="h-3 w-3" />}
+   890→   890→                        {s.status === "error" && <XCircle className="h-3 w-3" />}
+   891→   891→                        {s.status === "empty" && <AlertTriangle className="h-3 w-3" />}
+   892→   892→                        <span className="font-medium">{s.name}</span>
+   893→   893→                        <span className="text-[10px] opacity-80">
+   894→   894→                          {s.count > 0 ? `(${s.count})` : s.status}
+   895→   895→                        </span>
+   896→   896→                        {s.status === "error" && s.error && (
+   897→   897→                          <span className="text-[10px] opacity-60 italic ml-1" title={s.error}>
+   898→   898→                            {s.error.slice(0, 50)}
+   899→   899→                          </span>
+   900→   900→                        )}
+   901→   901→                      </Badge>
+   902→   902→                    ))}
+   903→   903→                  </div>
+   904→   904→
+   905→   905→                  {data.totalProducts === 0 && data.sites.some((s) => s.status !== "ok") && (
+   906→   906→                    <div className="mt-3 flex items-start gap-2 rounded-md bg-red-50 border border-red-200 p-3 text-xs text-red-900">
+   907→   907→                      <XCircle className="h-4 w-4 mt-0.5 shrink-0" />
+   908→   908→                      <div>
+   909→   909→                        <strong>Aucun produit trouvé pour cette sélection.</strong>
+   910→   910→                        <div className="mt-1 space-y-0.5">
+   911→   911→                          {data.sites.filter((s) => s.status !== "ok").map((s) => (
+   912→   912→                            <div key={s.id}>
+   913→   913→                              <span className="font-medium">{s.name}</span> :{" "}
+   914→   914→                              {s.status === "error" && s.error ? s.error : "0 résultat"}
+   915→   915→                              {s.error?.includes("403") && (
+   916→   916→                                <span className="text-red-700"> — bloqué par Cloudflare (IP data-center non acceptée). Ce site fonctionne depuis une IP résidentielle.</span>
+   917→   917→                              )}
+   918→   918→                              {s.status === "empty" && s.id === "sportconrad" && (
+   919→   919→                                <span className="text-red-700"> — API Makaira répond 500 depuis le data-center.</span>
+   920→   920→                              )}
+   921→   921→                              {s.error?.includes("Failed to fetch") && (
+   922→   922→                                <span className="text-red-700"> — challenge anti-bot non résolu, même via Playwright.</span>
+   923→   923→                              )}
+   924→   924→                            </div>
+   925→   925→                          ))}
+   926→   926→                        </div>
+   927→   927→                        <div className="mt-2 text-stone-600">
+   928→   928→                          Astuce : dé-sélectionne les sites en erreur dans la sidebar et relance la recherche.
+   929→   929→                          Les sites fonctionnels (Bergzeit, Sport Bittl, Ekosport, Montaz, Snowleader, Glisshop)
+   930→   930→                          renvoient des produits en quelques secondes.
+   931→   931→                        </div>
+   932→   932→                      </div>
+   933→   933→                    </div>
+   934→   934→                  )}
+   935→   935→                </CardContent>
+   936→   936→              </Card>
+   937→   937→
+   938→   938→              {/* Liste produits matchés */}
+   939→   939→              {filtered.length === 0 ? (
+   940→   940→                <Card>
+   941→   941→                  <CardContent className="p-8 text-center text-stone-500">
+   942→   942→                    Aucun produit ne correspond aux filtres actuels.
+   943→   943→                  </CardContent>
+   944→   944→                </Card>
+   945→   945→              ) : (
+   946→   946→                <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+   947→   947→                  {filtered.map((p) => (
+   948→   948→                    <MatchedProductCard key={p.id} product={p} />
+   949→   949→                  ))}
+   950→   950→                </div>
+   951→   951→              )}
+   952→   952→            </>
+   953→   953→          )}
+   954→   954→        </section>
+   955→   955→      </main>
+   956→   956→
+   957→   957→      <footer className="mt-auto border-t border-stone-200 bg-white">
+   958→   958→        <div className="mx-auto max-w-7xl px-4 py-4 text-xs text-stone-500 flex flex-wrap items-center justify-between gap-2">
+   959→   959→          <span className="flex items-center gap-1.5">
+   960→   960→            <Globe className="h-3 w-3" />
+   961→   961→            11 sites agrégés + matching cross-site par EAN/marque/similarité
+   962→   962→          </span>
+   963→   963→          <span>
+   964→   964→            Données indicatives — vérifiez toujours le prix final sur le site marchand.
+   965→   965→          </span>
+   966→   966→        </div>
+   967→   967→      </footer>
+   968→   968→
+   969→   969→      {/* Zone de logs dépliable (sticky en bas) */}
+   970→   970→      <LogsPanel logs={logs} onClear={clearLogs} />
+   971→   971→    </div>
+   972→   972→  );
+   973→   973→}
+   974→   974→
+   975→   975→// ---------------------------------------------------------------------------
+   976→   976→// LogsPanel : zone dépliable avec filtre par niveau (error/warning/info)
+   977→   977→// ---------------------------------------------------------------------------
+   978→   978→
+   979→   979→function LogsPanel({ logs, onClear }: { logs: LogEntry[]; onClear: () => void }) {
+   980→   980→  const [expanded, setExpanded] = useState(false);
+   981→   981→  const [activeLevels, setActiveLevels] = useState<Set<LogLevel>>(new Set(["error", "warning", "info"]));
+   982→   982→  const [siteFilter, setSiteFilter] = useState<string>("");
+   983→   983→
+   984→   984→  const toggleLevel = (lvl: LogLevel) => {
+   985→   985→    setActiveLevels((prev) => {
+   986→   986→      const next = new Set(prev);
+   987→   987→      if (next.has(lvl)) next.delete(lvl);
+   988→   988→      else next.add(lvl);
+   989→   989→      return next;
+   990→   990→    });
+   991→   991→  };
+   992→   992→
+   993→   993→  const filtered = logs.filter((l) => {
+   994→   994→    if (!activeLevels.has(l.level)) return false;
+   995→   995→    if (siteFilter && !(l.site ?? "").toLowerCase().includes(siteFilter.toLowerCase())) return false;
+   996→   996→    return true;
+   997→   997→  });
+   998→   998→
+   999→   999→  const counts = {
+  1000→  1000→    error: logs.filter((l) => l.level === "error").length,
+  1001→  1001→    warning: logs.filter((l) => l.level === "warning").length,
+  1002→  1002→    info: logs.filter((l) => l.level === "info").length,
+  1003→  1003→  };
+  1004→  1004→
+  1005→  1005→  return (
+  1006→  1006→    <div className={`fixed bottom-0 left-0 right-0 z-40 bg-white border-t-2 border-stone-300 shadow-2xl transition-transform duration-200 ${expanded ? "translate-y-0" : "translate-y-[calc(100%-2.5rem)]"}`}>
+  1007→  1007→      {/* Header (always visible) */}
+  1008→  1008→      <button
+  1009→  1009→        onClick={() => setExpanded((e) => !e)}
+  1010→  1010→        className="w-full px-4 h-10 flex items-center gap-3 hover:bg-stone-50 transition"
+  1011→  1011→      >
+  1012→  1012→        <Layers className="h-4 w-4 text-stone-600" />
+  1013→  1013→        <span className="text-sm font-medium text-stone-800">Logs</span>
+  1014→  1014→        <div className="flex items-center gap-1.5 text-[11px]">
+  1015→  1015→          <span className={`px-1.5 py-0.5 rounded ${counts.error > 0 ? "bg-rose-100 text-rose-700" : "bg-stone-100 text-stone-500"}`}>
+  1016→  1016→            {counts.error} err
+  1017→  1017→          </span>
+  1018→  1018→          <span className={`px-1.5 py-0.5 rounded ${counts.warning > 0 ? "bg-amber-100 text-amber-700" : "bg-stone-100 text-stone-500"}`}>
+  1019→  1019→            {counts.warning} warn
+  1020→  1020→          </span>
+  1021→  1021→          <span className={`px-1.5 py-0.5 rounded ${counts.info > 0 ? "bg-blue-100 text-blue-700" : "bg-stone-100 text-stone-500"}`}>
+  1022→  1022→            {counts.info} info
+  1023→  1023→          </span>
+  1024→  1024→        </div>
+  1025→  1025→        <span className="ml-auto text-stone-500 text-xs">
+  1026→  1026→          {expanded ? "▼ cliquer pour réduire" : "▲ cliquer pour étendre"}
+  1027→  1027→        </span>
+  1028→  1028→      </button>
+  1029→  1029→      {/* Content (visible when expanded) */}
+  1030→  1030→      {expanded && (
+  1031→  1031→        <div className="border-t border-stone-200 px-4 py-3 max-h-[60vh] flex flex-col gap-2">
+  1032→  1032→          {/* Toolbar */}
+  1033→  1033→          <div className="flex flex-wrap items-center gap-2 text-xs">
+  1034→  1034→            <span className="text-stone-500">Niveau :</span>
+  1035→  1035→            {(["error", "warning", "info"] as LogLevel[]).map((lvl) => {
+  1036→  1036→              const isActive = activeLevels.has(lvl);
+  1037→  1037→              const color = lvl === "error" ? "bg-rose-100 text-rose-700 border-rose-300"
+  1038→  1038→                : lvl === "warning" ? "bg-amber-100 text-amber-700 border-amber-300"
+  1039→  1039→                : "bg-blue-100 text-blue-700 border-blue-300";
+  1040→  1040→              return (
+  1041→  1041→                <button
+  1042→  1042→                  key={lvl}
+  1043→  1043→                  onClick={() => toggleLevel(lvl)}
+  1044→  1044→                  className={`px-2 py-1 rounded border text-[11px] transition ${
+  1045→  1045→                    isActive ? color : "bg-white text-stone-400 border-stone-200"
+  1046→  1046→                  }`}
+  1047→  1047→                >
+  1048→  1048→                  {lvl === "error" ? "Errors" : lvl === "warning" ? "Warnings" : "Messages"}
+  1049→  1049→                </button>
+  1050→  1050→              );
+  1051→  1051→            })}
+  1052→  1052→            <input
+  1053→  1053→              type="text"
+  1054→  1054→              placeholder="Filtrer par site (ex: bergzeit)"
+  1055→  1055→              value={siteFilter}
+  1056→  1056→              onChange={(e) => setSiteFilter(e.target.value)}
+  1057→  1057→              className="ml-2 px-2 py-1 text-[11px] border border-stone-200 rounded w-48"
+  1058→  1058→            />
+  1059→  1059→            <span className="ml-auto text-stone-500">
+  1060→  1060→              {filtered.length} / {logs.length} logs affichés
+  1061→  1061→            </span>
+  1062→  1062→            <button
+  1063→  1063→              onClick={onClear}
+  1064→  1064→              className="px-2 py-1 text-[11px] rounded border border-stone-200 hover:bg-stone-100 text-stone-600"
+  1065→  1065→              title="Vider le buffer de logs"
+  1066→  1066→            >
+  1067→  1067→              Vider
+  1068→  1068→            </button>
+  1069→  1069→          </div>
+  1070→  1070→          {/* Log entries */}
+  1071→  1071→          <div className="overflow-y-auto flex-1 bg-stone-50 border border-stone-200 rounded p-2 font-mono text-[11px] space-y-0.5">
+  1072→  1072→            {filtered.length === 0 ? (
+  1073→  1073→              <div className="text-stone-400 italic p-4 text-center">
+  1074→  1074→                Aucun log pour le moment. Lance une recherche pour voir les statuts par site.
+  1075→  1075→              </div>
+  1076→  1076→            ) : (
+  1077→  1077→              filtered.slice().reverse().map((l) => {
+  1078→  1078→                const color = l.level === "error"
+  1079→  1079→                  ? "text-rose-700 bg-rose-50"
+  1080→  1080→                  : l.level === "warning"
+  1081→  1081→                  ? "text-amber-800 bg-amber-50"
+  1082→  1082→                  : "text-blue-800 bg-blue-50";
+  1083→  1083→                const time = new Date(l.timestamp).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+  1084→  1084→                const levelLabel = l.level === "error" ? "ERR" : l.level === "warning" ? "WRN" : "INF";
+  1085→  1085→                return (
+  1086→  1086→                  <div key={l.id} className={`px-2 py-1 rounded ${color} flex gap-2`}>
+  1087→  1087→                    <span className="text-stone-500 shrink-0">{time}</span>
+  1088→  1088→                    <span className="font-bold shrink-0 w-8">{levelLabel}</span>
+  1089→  1089→                    {l.site && (
+  1090→  1090→                      <span className="font-semibold shrink-0 min-w-[80px] max-w-[140px] truncate">
+  1091→  1091→                        [{l.site}]
+  1092→  1092→                      </span>
+  1093→  1093→                    )}
+  1094→  1094→                    <span className="flex-1 break-all">{l.message}</span>
+  1095→  1095→                  </div>
+  1096→  1096→                );
+  1097→  1097→              })
+  1098→  1098→            )}
+  1099→  1099→          </div>
+  1100→  1100→        </div>
+  1101→  1101→      )}
+  1102→  1102→    </div>
+  1103→  1103→  );
+  1104→  1104→}
+  1105→  1105→
+  1106→  1106→/** Balloon for an active filter — shows label + X to remove. */
+  1107→  1107→function FilterBalloon({ label, onRemove }: { label: string; onRemove: () => void }) {
+  1108→  1108→  return (
+  1109→  1109→    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-stone-900 text-white text-[11px] font-medium group">
+  1110→  1110→      <span className="max-w-[120px] truncate">{label}</span>
+  1111→  1111→      <button
+  1112→  1112→        onClick={onRemove}
+  1113→  1113→        className="ml-0.5 -mr-0.5 rounded-full hover:bg-stone-700 p-0.5 transition shrink-0"
+  1114→  1114→        title={`Retirer le filtre "${label}"`}
+  1115→  1115→      >
+  1116→  1116→        <X className="h-3 w-3" />
+  1117→  1117→      </button>
+  1118→  1118→    </span>
+  1119→  1119→  );
+  1120→  1120→}
+  1121→  1121→
+  1122→  1122→function FilterSection({
+  1123→  1123→  title,
+  1124→  1124→  icon,
+  1125→  1125→  options,
+  1126→  1126→  active,
+  1127→  1127→  onToggle,
+  1128→  1128→}: {
+  1129→  1129→  title: string;
+  1130→  1130→  icon: React.ReactNode;
+  1131→  1131→  options: { value: string; count: number }[];
+  1132→  1132→  active: Set<string>;
+  1133→  1133→  onToggle: (v: string) => void;
+  1134→  1134→}) {
+  1135→  1135→  const [open, setOpen] = useState(true);
+  1136→  1136→  if (options.length === 0) return null;
+  1137→  1137→  return (
+  1138→  1138→    <div>
+  1139→  1139→      <button
+  1140→  1140→        onClick={() => setOpen((o) => !o)}
+  1141→  1141→        className="w-full flex items-center justify-between text-xs text-stone-500 hover:text-stone-700"
+  1142→  1142→      >
+  1143→  1143→        <span className="flex items-center gap-1.5">
+  1144→  1144→          {icon}
+  1145→  1145→          {title}
+  1146→  1146→          {active.size > 0 && <Badge variant="secondary" className="text-[10px]">{active.size}</Badge>}
+  1147→  1147→        </span>
+  1148→  1148→        {open ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+  1149→  1149→      </button>
+  1150→  1150→      {open && (
+  1151→  1151→        <div className="mt-2 space-y-1.5 max-h-44 overflow-y-auto pr-1">
+  1152→  1152→          {options.map((opt) => (
+  1153→  1153→            <label
+  1154→  1154→              key={opt.value}
+  1155→  1155→              className="flex items-center gap-2 cursor-pointer text-sm rounded p-0.5 hover:bg-stone-50"
+  1156→  1156→            >
+  1157→  1157→              <Checkbox
+  1158→  1158→                checked={active.has(opt.value)}
+  1159→  1159→                onCheckedChange={() => onToggle(opt.value)}
+  1160→  1160→              />
+  1161→  1161→              <span className="flex-1 truncate capitalize">{opt.value}</span>
+  1162→  1162→              <span className="text-[11px] text-stone-400">{opt.count}</span>
+  1163→  1163→            </label>
+  1164→  1164→          ))}
+  1165→  1165→        </div>
+  1166→  1166→      )}
+  1167→  1167→    </div>
+  1168→  1168→  );
+  1169→  1169→}
+  1170→  1170→
+  1171→  1171→function MatchedProductCard({ product }: { product: MatchedProduct }) {
+  1172→  1172→  const [showOffers, setShowOffers] = useState(false);
+  1173→  1173→  const offers = product.offers;
+  1174→  1174→  const best = product.bestOffer;
+  1175→  1175→  const hasPromo = offers.some((o) => (o.discount ?? 0) > 0);
+  1176→  1176→
+  1177→  1177→  return (
+  1178→  1178→    <Card className="overflow-hidden hover:shadow-md transition-shadow flex flex-col">
+  1179→  1179→      <div className="flex flex-col sm:flex-row">
+  1180→  1180→        {/* Image */}
+  1181→  1181→        <div className="relative sm:w-40 aspect-[4/3] bg-stone-100 shrink-0">
+  1182→  1182→          {product.image ? (
+  1183→  1183→            <img
+  1184→  1184→              src={product.image}
+  1185→  1185→              alt={product.title}
+  1186→  1186→              className="h-full w-full object-cover"
+  1187→  1187→              loading="lazy"
+  1188→  1188→              onError={(e) => {
+  1189→  1189→                (e.currentTarget as HTMLImageElement).style.display = "none";
+  1190→  1190→              }}
+  1191→  1191→            />
+  1192→  1192→          ) : (
+  1193→  1193→            <div className="h-full w-full grid place-items-center text-stone-400">
+  1194→  1194→              <ShoppingCart className="h-10 w-10" />
+  1195→  1195→            </div>
+  1196→  1196→          )}
+  1197→  1197→          {hasPromo && (
+  1198→  1198→            <Badge className="absolute top-2 left-2 bg-rose-600 text-white hover:bg-rose-600">
+  1199→  1199→              <TrendingDown className="h-3 w-3 mr-0.5" /> Promo
+  1200→  1200→            </Badge>
+  1201→  1201→          )}
+  1202→  1202→        </div>
+  1203→  1203→
+  1204→  1204→        {/* Détails */}
+  1205→  1205→        <CardContent className="p-3 flex-1 min-w-0 space-y-2">
+  1206→  1206→          <div className="flex flex-wrap items-start gap-1.5">
+  1207→  1207→            {product.brand && (
+  1208→  1208→              <Badge variant="secondary" className="text-xs">
+  1209→  1209→                {product.brand}
+  1210→  1210→              </Badge>
+  1211→  1211→            )}
+  1212→  1212→            {product.sport && (
+  1213→  1213→              <Badge variant="outline" className="text-xs bg-emerald-50 text-emerald-800 border-emerald-200">
+  1214→  1214→                {product.sport}
+  1215→  1215→              </Badge>
+  1216→  1216→            )}
+  1217→  1217→            {product.category && (
+  1218→  1218→              <Badge variant="outline" className="text-xs">
+  1219→  1219→                {product.category}
+  1220→  1220→              </Badge>
+  1221→  1221→            )}
+  1222→  1222→            {product.subcategory && (
+  1223→  1223→              <Badge variant="outline" className="text-xs text-stone-600">
+  1224→  1224→                {product.subcategory}
+  1225→  1225→              </Badge>
+  1226→  1226→            )}
+  1227→  1227→            {product.range && (
+  1228→  1228→              <Badge variant="outline" className="text-xs bg-violet-50 text-violet-800 border-violet-200">
+  1229→  1229→                {product.range}
+  1230→  1230→              </Badge>
+  1231→  1231→            )}
+  1232→  1232→            {product.metadata.gender && (
+  1233→  1233→              <Badge variant="outline" className="text-xs capitalize">
+  1234→  1234→                {product.metadata.gender}
+  1235→  1235→              </Badge>
+  1236→  1236→            )}
+  1237→  1237→            <Badge variant="outline" className="text-xs bg-stone-100">
+  1238→  1238→              <Layers className="h-3 w-3 mr-1" />
+  1239→  1239→              {product.siteCount} site{product.siteCount > 1 ? "s" : ""}
+  1240→  1240→            </Badge>
+  1241→  1241→            {product.metadata.rating ? (
+  1242→  1242→              <Badge variant="outline" className="text-xs bg-amber-50 text-amber-800 border-amber-200">
+  1243→  1243→                <Star className="h-3 w-3 mr-1 fill-amber-400 text-amber-500" />
+  1244→  1244→                {product.metadata.rating.toFixed(1)}
+  1245→  1245→                {product.metadata.reviewCount ? ` (${product.metadata.reviewCount})` : ""}
+  1246→  1246→              </Badge>
+  1247→  1247→            ) : null}
+  1248→  1248→          </div>
+  1249→  1249→
+  1250→  1250→          <h3 className="text-sm font-semibold leading-snug line-clamp-2" title={product.title}>
+  1251→  1251→            {product.title}
+  1252→  1252→          </h3>
+  1253→  1253→
+  1254→  1254→          {/* Métadonnées techniques clés */}
+  1255→  1255→          {(product.metadata.weight || product.metadata.material || product.metadata.color?.length ||
+  1256→  1256→            product.metadata.modelYear || product.metadata.ean) && (
+  1257→  1257→            <div className="flex flex-wrap gap-1.5 text-[11px] text-stone-600">
+  1258→  1258→              {product.metadata.modelYear && (
+  1259→  1259→                <span className="px-1.5 py-0.5 rounded bg-stone-100">
+  1260→  1260→                  📅 {product.metadata.modelYear}
+  1261→  1261→                </span>
+  1262→  1262→              )}
+  1263→  1263→              {product.metadata.weight && (
+  1264→  1264→                <span className="px-1.5 py-0.5 rounded bg-stone-100">
+  1265→  1265→                  ⚖ {product.metadata.weight}
+  1266→  1266→                </span>
+  1267→  1267→              )}
+  1268→  1268→              {product.metadata.material && (
+  1269→  1269→                <span className="px-1.5 py-0.5 rounded bg-stone-100">
+  1270→  1270→                  🧱 {product.metadata.material}
+  1271→  1271→                </span>
+  1272→  1272→              )}
+  1273→  1273→              {product.metadata.color && product.metadata.color.length > 0 && (
+  1274→  1274→                <ColorSwatches colors={product.metadata.color} />
+  1275→  1275→              )}
+  1276→  1276→              {product.metadata.ean && (
+  1277→  1277→                <span className="px-1.5 py-0.5 rounded bg-stone-100 font-mono text-[10px]">
+  1278→  1278→                  EAN: {product.metadata.ean}
+  1279→  1279→                </span>
+  1280→  1280→              )}
+  1281→  1281→            </div>
+  1282→  1282→          )}
+  1283→  1283→
+  1284→  1284→          {/* Bloc prix */}
+  1285→  1285→          <div className="flex items-end justify-between pt-1">
+  1286→  1286→            <div>
+  1287→  1287→              <div className="text-[11px] text-stone-500">dès</div>
+  1288→  1288→              <div className="text-xl font-bold text-stone-900 leading-none">
+  1289→  1289→                {formatPrice(product.minPrice, product.minCurrency)}
+  1290→  1290→              </div>
+  1291→  1291→              {product.savings && product.savings > 0 ? (
+  1292→  1292→                <div className="text-[11px] text-emerald-700 mt-0.5 flex items-center gap-1">
+  1293→  1293→                  <TrendingDown className="h-3 w-3" />
+  1294→  1294→                  économisez jusqu&apos;à {formatPrice(product.savings, product.minCurrency)}
+  1295→  1295→                </div>
+  1296→  1296→              ) : null}
+  1297→  1297→            </div>
+  1298→  1298→            {best && (
+  1299→  1299→              <Button asChild size="sm">
+  1300→  1300→                <a href={best.url} target="_blank" rel="noopener noreferrer">
+  1301→  1301→                  Voir l&apos;offre <ExternalLink className="h-3 w-3 ml-1" />
+  1302→  1302→                </a>
+  1303→  1303→              </Button>
+  1304→  1304→            )}
+  1305→  1305→          </div>
+  1306→  1306→        </CardContent>
+  1307→  1307→      </div>
+  1308→  1308→
+  1309→  1309→      {/* Liste dépliable des offres multi-sites */}
+  1310→  1310→      <div className="border-t border-stone-100 bg-stone-50/50">
+  1311→  1311→        <button
+  1312→  1312→          onClick={() => setShowOffers((s) => !s)}
+  1313→  1313→          className="w-full px-3 py-2 flex items-center justify-between text-xs text-stone-600 hover:bg-stone-100 transition"
+  1314→  1314→        >
+  1315→  1315→          <span className="flex items-center gap-1.5">
+  1316→  1316→            <Layers className="h-3.5 w-3.5" />
+  1317→  1317→            {offers.length} offre{offers.length > 1 ? "s" : ""} · {offers.map((o) => o.siteName).join(", ")}
+  1318→  1318→            {product.matchScore ? (
+  1319→  1319→              <span className="ml-2 px-1.5 py-0.5 rounded bg-stone-200 text-[10px] font-mono" title={product.matchReason}>
+  1320→  1320→                match {Math.round((product.matchScore ?? 0) * 100)}%
+  1321→  1321→              </span>
+  1322→  1322→            ) : null}
+  1323→  1323→          </span>
+  1324→  1324→          {showOffers ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+  1325→  1325→        </button>
+  1326→  1326→        {showOffers && (
+  1327→  1327→          <div className="px-3 pb-2 space-y-1.5">
+  1328→  1328→            {product.matchReason && (
+  1329→  1329→              <div className="text-[10px] text-stone-500 font-mono px-1 pb-1" title="Critères de matching">
+  1330→  1330→                match: {product.matchReason}
+  1331→  1331→              </div>
+  1332→  1332→            )}
+  1333→  1333→            {offers.map((o, i) => (
+  1334→  1334→              <OfferRow key={`${o.site}-${i}`} offer={o} />
+  1335→  1335→            ))}
+  1336→  1336→          </div>
+  1337→  1337→        )}
+  1338→  1338→      </div>
+  1339→  1339→    </Card>
+  1340→  1340→  );
+  1341→  1341→}
+  1342→  1342→
+  1343→  1343→/** Affiche une ligne de swatches de couleur (cercles colorés) avec infobulle.
+  1344→  1344→ *  Montre aussi le nombre de coloris distincts si > 1 (cosmetic variants groupés). */
+  1345→  1345→function ColorSwatches({ colors }: { colors: string[] }) {
+  1346→  1346→  // Déduplique en gardant l'ordre d'apparition (insensible à la casse/accents)
+  1347→  1347→  const seen = new Set<string>();
+  1348→  1348→  const unique: string[] = [];
+  1349→  1349→  for (const c of colors) {
+  1350→  1350→    const k = canonColor(c);
+  1351→  1351→    if (!seen.has(k)) {
+  1352→  1352→      seen.add(k);
+  1353→  1353→      unique.push(c);
+  1354→  1354→    }
+  1355→  1355→  }
+  1356→  1356→  if (unique.length === 0) return null;
+  1357→  1357→  const shown = unique.slice(0, 8);
+  1358→  1358→  const remaining = unique.length - shown.length;
+  1359→  1359→  return (
+  1360→  1360→    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-stone-100">
+  1361→  1361→      <span className="flex items-center gap-0.5">
+  1362→  1362→        {shown.map((c, i) => {
+  1363→  1363→          const hex = colorToHex(c);
+  1364→  1364→          return (
+  1365→  1365→            <span
+  1366→  1366→              key={`${c}-${i}`}
+  1367→  1367→              title={c}
+  1368→  1368→              className="inline-block w-3 h-3 rounded-full border border-stone-400 shadow-sm"
+  1369→  1369→              style={{ backgroundColor: hex ?? "transparent" }}
+  1370→  1370→            />
+  1371→  1371→          );
+  1372→  1372→        })}
+  1373→  1373→        {remaining > 0 && (
+  1374→  1374→          <span className="text-[10px] text-stone-500 ml-0.5">+{remaining}</span>
+  1375→  1375→        )}
+  1376→  1376→      </span>
+  1377→  1377→      <span className="text-[10px] text-stone-600 ml-0.5">
+  1378→  1378→        {unique.length > 1 ? `${unique.length} coloris` : "1 coloris"}
+  1379→  1379→      </span>
+  1380→  1380→    </span>
+  1381→  1381→  );
+  1382→  1382→}
+  1383→  1383→
+  1384→  1384→function OfferRow({ offer }: { offer: ProductOffer }) {
+  1385→  1385→  const meta = SITES[offer.site];
+  1386→  1386→  const isBest = offer.price !== null && offer.price === Math.min(...[offer.price]);
+  1387→  1387→  return (
+  1388→  1388→    <div className="flex items-center gap-2 rounded-md bg-white border border-stone-200 p-2 text-xs">
+  1389→  1389→      <Badge variant="outline" className={`text-[10px] shrink-0 ${meta.accent}`}>
+  1390→  1390→        {meta.name}
+  1391→  1391→      </Badge>
+  1392→  1392→      <div className="flex-1 min-w-0">
+  1393→  1393→        <div className="font-medium truncate">{offer.title}</div>
+  1394→  1394→        <div className="text-[10px] text-stone-500 flex items-center gap-1.5">
+  1395→  1395→          <span>{getHostname(offer.url)}</span>
+  1396→  1396→          {/* Swatches couleurs spécifiques à cette offre (cosmetic variant) */}
+  1397→  1397→          {offer.color && offer.color.length > 0 && (
+  1398→  1398→            <span className="flex items-center gap-0.5 ml-1">
+  1399→  1399→              {offer.color.slice(0, 5).map((c, i) => {
+  1400→  1400→                const hex = colorToHex(c);
+  1401→  1401→                return (
+  1402→  1402→                  <span
+  1403→  1403→                    key={`${c}-${i}`}
+  1404→  1404→                    title={c}
+  1405→  1405→                    className="inline-block w-2.5 h-2.5 rounded-full border border-stone-300"
+  1406→  1406→                    style={{ backgroundColor: hex ?? "transparent" }}
+  1407→  1407→                  />
+  1408→  1408→                );
+  1409→  1409→              })}
+  1410→  1410→              {offer.color.length > 5 && (
+  1411→  1411→                <span className="text-stone-400 ml-0.5">+{offer.color.length - 5}</span>
+  1412→  1412→              )}
+  1413→  1413→            </span>
+  1414→  1414→          )}
+  1415→  1415→          {offer.availability === "out_of_stock" ? (
+  1416→  1416→            <span className="text-rose-600">· Rupture</span>
+  1417→  1417→          ) : offer.availability === "in_stock" ? (
+  1418→  1418→            <span className="text-emerald-600">· En stock</span>
+  1419→  1419→          ) : null}
+  1420→  1420→          {offer.discount ? (
+  1421→  1421→            <span className="text-rose-600">· -{offer.discount}%</span>
+  1422→  1422→          ) : null}
+  1423→  1423→        </div>
+  1424→  1424→      </div>
+  1425→  1425→      <div className="text-right shrink-0">
+  1426→  1426→        <div className={`font-semibold ${isBest ? "text-emerald-700" : ""}`}>
+  1427→  1427→          {formatPrice(offer.price, offer.currency)}
+  1428→  1428→        </div>
+  1429→  1429→        {offer.originalPrice ? (
+  1430→  1430→          <div className="text-[10px] text-stone-400 line-through">
+  1431→  1431→            {formatPrice(offer.originalPrice, offer.currency)}
+  1432→  1432→          </div>
+  1433→  1433→        ) : null}
+  1434→  1434→      </div>
+  1435→  1435→      <Button asChild size="sm" variant="outline" className="h-7 px-2 shrink-0">
+  1436→  1436→        <a href={offer.url} target="_blank" rel="noopener noreferrer">
+  1437→  1437→          <ExternalLink className="h-3 w-3" />
+  1438→  1438→        </a>
+  1439→  1439→      </Button>
+  1440→  1440→    </div>
+  1441→  1441→  );
+  1442→  1442→}
+  1443→  1443→
+  1444→  1444→function EmptyState({ onSuggestion }: { onSuggestion: (s: string) => void }) {
+  1445→  1445→  return (
+  1446→  1446→    <div className="grid place-items-center py-16">
+  1447→  1447→      <Card className="max-w-2xl w-full">
+  1448→  1448→        <CardHeader>
+  1449→  1449→          <CardTitle className="flex items-center gap-2">
+  1450→  1450→            <Mountain className="h-5 w-5" /> Comparateur de prix outdoor avec matching
+  1451→  1451→          </CardTitle>
+  1452→  1452→        </CardHeader>
+  1453→  1453→        <CardContent className="space-y-4">
+  1454→  1454→          <p className="text-sm text-stone-600">
+  1455→  1455→            Recherchez en parallèle sur <strong>9 boutiques outdoor</strong>. Pour chaque produit,
+  1456→  1456→            le moteur <strong>récupère la page produit</strong>, en extrait les métadonnées
+  1457→  1457→            (marque, catégorie, couleur, taille, poids, EAN…), puis <strong>regroupe les offres
+  1458→  1458→            cross-site</strong> en une seule entrée. Les filtres se construisent dynamiquement
+  1459→  1459→            à partir des métadonnées extraites.
+  1460→  1460→          </p>
+  1461→  1461→          <div>
+  1462→  1462→            <div className="text-xs uppercase tracking-wide text-stone-500 mb-2">
+  1463→  1463→              Quelques idées de recherche
+  1464→  1464→            </div>
+  1465→  1465→            <div className="flex flex-wrap gap-2">
+  1466→  1466→              {SUGGESTIONS.map((s) => (
+  1467→  1467→                <button
+  1468→  1468→                  key={s}
+  1469→  1469→                  onClick={() => onSuggestion(s)}
+  1470→  1470→                  className="px-3 py-1.5 rounded-full bg-stone-100 hover:bg-stone-200 transition border border-stone-200 text-sm text-stone-700"
+  1471→  1471→                >
+  1472→  1472→                  {s}
+  1473→  1473→                </button>
+  1474→  1474→              ))}
+  1475→  1475→            </div>
+  1476→  1476→          </div>
+  1477→  1477→          <div className="grid grid-cols-3 gap-2 pt-2">
+  1478→  1478→            {ALL_SITE_IDS.slice(0, 9).map((id) => (
+  1479→  1479→              <div
+  1480→  1480→                key={id}
+  1481→  1481→                className={`rounded-md border px-2 py-1.5 text-xs text-center ${SITES[id].accent}`}
+  1482→  1482→              >
+  1483→  1483→                {SITES[id].name}
+  1484→  1484→              </div>
+  1485→  1485→            ))}
+  1486→  1486→          </div>
+  1487→  1487→        </CardContent>
+  1488→  1488→      </Card>
+  1489→  1489→    </div>
+  1490→  1490→  );
+  1491→  1491→}
+  1492→  1492→
+  1493→  1493→function LoadingState() {
+  1494→  1494→  return (
+  1495→  1495→    <div className="space-y-4">
+  1496→  1496→      <Card>
+  1497→  1497→        <CardContent className="p-4">
+  1498→  1498→          <div className="flex items-center gap-3">
+  1499→  1499→            <Loader2 className="h-5 w-5 animate-spin text-stone-500" />
+  1500→  1500→            <div className="text-sm text-stone-600">
+  1501→  1501→              Workflow en cours : <strong>recherche</strong> → <strong>enrichissement pages produits</strong> →{" "}
+  1502→  1502→              <strong>matching cross-site</strong> → <strong>filtres dynamiques</strong>
+  1503→  1503→            </div>
+  1504→  1504→          </div>
+  1505→  1505→          <div className="mt-3 grid grid-cols-3 sm:grid-cols-9 gap-2">
+  1506→  1506→            {ALL_SITE_IDS.map((id) => (
+  1507→  1507→              <div key={id} className={`rounded border px-2 py-1 text-center text-[11px] ${SITES[id].accent}`}>
+  1508→  1508→                {SITES[id].name}
+  1509→  1509→              </div>
+  1510→  1510→            ))}
+  1511→  1511→          </div>
+  1512→  1512→        </CardContent>
+  1513→  1513→      </Card>
+  1514→  1514→      <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+  1515→  1515→        {Array.from({ length: 6 }).map((_, i) => (
+  1516→  1516→          <Card key={i}>
+  1517→  1517→            <div className="flex">
+  1518→  1518→              <Skeleton className="w-40 aspect-[4/3] rounded-none" />
+  1519→  1519→              <CardContent className="p-3 flex-1 space-y-2">
+  1520→  1520→                <Skeleton className="h-4 w-1/2" />
+  1521→  1521→                <Skeleton className="h-3 w-3/4" />
+  1522→  1522→                <Skeleton className="h-3 w-2/3" />
+  1523→  1523→                <Skeleton className="h-6 w-1/3 mt-2" />
+  1524→  1524→              </CardContent>
+  1525→  1525→            </div>
+  1526→  1526→            <Skeleton className="h-10 w-full rounded-none" />
+  1527→  1527→          </Card>
+  1528→  1528→        ))}
+  1529→  1529→      </div>
+  1530→  1530→    </div>
+  1531→  1531→  );
+  1532→  1532→}
+  1533→  1533→
+  1534→  1534→// ---------------------------------------------------------------------------
+  1535→  1535→// GroupMatrixModal : popup avec vue matricielle (sites × groupes)
+  1536→  1536→// --------------------------------------------------------------------------
+  1537→  1537→// Chaque ligne = une boutique. Chaque colonne = un groupe (builtin ou custom).
+  1538→  1538→// L'utilisateur coche/décoche les cases pour assigner une boutique à un ou
+  1539→  1539→// plusieurs groupes. Les groupes builtin (outdoor, cycling, it) sont éditables
+  1540→  1540→// aussi — ça permet par exemple d'ajouter Barrabes à "Cycling" si on veut.
+  1541→  1541→// Le groupe "all" est exclu (il est implicite : tous les sites).
+  1542→  1542→// --------------------------------------------------------------------------
+  1543→  1543→
+  1544→  1544→function GroupMatrixModal({
+  1545→  1545→  groups,
+  1546→  1546→  onGroupsChange,
+  1547→  1547→  onClose,
+  1548→  1548→}: {
+  1549→  1549→  groups: ShopGroup[];
+  1550→  1550→  onGroupsChange: (next: ShopGroup[]) => void;
+  1551→  1551→  onClose: () => void;
+  1552→  1552→}) {
+  1553→  1553→  const [newGroupName, setNewGroupName] = useState("");
+  1554→  1554→  const [newGroupIcon, setNewGroupIcon] = useState("");
+  1555→  1555→
+  1556→  1556→  // Groupes éditables = tous sauf "all" (qui est implicite)
+  1557→  1557→  const editableGroups = groups.filter((g) => g.id !== "all");
+  1558→  1558→
+  1559→  1559→  // Helper : vérifie si un site est dans un groupe
+  1560→  1560→  const isSiteInGroup = (siteId: SiteId, group: ShopGroup): boolean => {
+  1561→  1561→    return group.sites.includes(siteId);
+  1562→  1562→  };
+  1563→  1563→
+  1564→  1564→  // Toggle : ajoute ou retire un site d'un groupe
+  1565→  1565→  const toggleSiteInGroup = (siteId: SiteId, groupId: string) => {
+  1566→  1566→    const next = groups.map((g) => {
+  1567→  1567→      if (g.id !== groupId) return g;
+  1568→  1568→      const sites = new Set(g.sites);
+  1569→  1569→      if (sites.has(siteId)) sites.delete(siteId);
+  1570→  1570→      else sites.add(siteId);
+  1571→  1571→      return { ...g, sites: Array.from(sites) };
+  1572→  1572→    });
+  1573→  1573→    onGroupsChange(next);
+  1574→  1574→  };
+  1575→  1575→
+  1576→  1576→  // Crée un nouveau groupe custom
+  1577→  1577→  const addCustomGroup = () => {
+  1578→  1578→    const name = newGroupName.trim();
+  1579→  1579→    if (!name) return;
+  1580→  1580→    const id = `custom-${Date.now().toString(36)}`;
+  1581→  1581→    const newGroup: ShopGroup = {
+  1582→  1582→      id,
+  1583→  1583→      name,
+  1584→  1584→      icon: newGroupIcon.trim() || undefined,
+  1585→  1585→      description: "Groupe personnalisé",
+  1586→  1586→      accent: "bg-stone-100 text-stone-800 border-stone-300",
+  1587→  1587→      sites: [],
+  1588→  1588→      builtin: false,
+  1589→  1589→    };
+  1590→  1590→    onGroupsChange([...groups, newGroup]);
+  1591→  1591→    setNewGroupName("");
+  1592→  1592→    setNewGroupIcon("");
+  1593→  1593→  };
+  1594→  1594→
+  1595→  1595→  // Supprime un groupe custom (uniquement les custom — pas les builtin)
+  1596→  1596→  const removeGroup = (groupId: string) => {
+  1597→  1597→    const group = groups.find((g) => g.id === groupId);
+  1598→  1598→    if (!group || group.builtin) return;
+  1599→  1599→    if (!confirm(`Supprimer le groupe « ${group.name} » ?`)) return;
+  1600→  1600→    onGroupsChange(groups.filter((g) => g.id !== groupId));
+  1601→  1601→  };
+  1602→  1602→
+  1603→  1603→  return (
+  1604→  1604→    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
+  1605→  1605→      <div
+  1606→  1606→        className="bg-white rounded-lg shadow-2xl max-w-5xl w-full max-h-[90vh] flex flex-col"
+  1607→  1607→        onClick={(e) => e.stopPropagation()}
+  1608→  1608→      >
+  1609→  1609→        {/* Header */}
+  1610→  1610→        <div className="flex items-center gap-3 px-5 py-3 border-b border-stone-200">
+  1611→  1611→          <Layers className="h-5 w-5 text-stone-700" />
+  1612→  1612→          <h2 className="text-base font-semibold text-stone-900">Gérer les groupes</h2>
+  1613→  1613→          <span className="text-xs text-stone-500">
+  1614→  1614→            Vue matricielle : cochez les boutiques appartenant à chaque groupe
+  1615→  1615→          </span>
+  1616→  1616→          <button
+  1617→  1617→            onClick={onClose}
+  1618→  1618→            className="ml-auto text-stone-500 hover:text-stone-700"
+  1619→  1619→            title="Fermer"
+  1620→  1620→          >
+  1621→  1621→            <X className="h-5 w-5" />
+  1622→  1622→          </button>
+  1623→  1623→        </div>
+  1624→  1624→
+  1625→  1625→        {/* Matrix */}
+  1626→  1626→        <div className="overflow-auto flex-1 p-5">
+  1627→  1627→          <table className="w-full text-sm border-collapse">
+  1628→  1628→            <thead>
+  1629→  1629→              <tr className="border-b-2 border-stone-300">
+  1630→  1630→                <th className="text-left px-2 py-2 text-xs font-semibold text-stone-700 sticky left-0 bg-white">
+  1631→  1631→                  Boutique
+  1632→  1632→                </th>
+  1633→  1633→                {editableGroups.map((g) => (
+  1634→  1634→                  <th key={g.id} className="px-2 py-2 text-center min-w-[100px]">
+  1635→  1635→                    <div className="flex flex-col items-center gap-0.5">
+  1636→  1636→                      <span className="text-base">{g.icon ?? "•"}</span>
+  1637→  1637→                      <span className={`text-[11px] font-medium px-1.5 py-0.5 rounded ${g.accent ?? ""}`}>
+  1638→  1638→                        {g.name}
+  1639→  1639→                      </span>
+  1640→  1640→                      <span className="text-[10px] text-stone-500">
+  1641→  1641→                        {g.sites.length} site{g.sites.length !== 1 ? "s" : ""}
+  1642→  1642→                      </span>
+  1643→  1643→                      {!g.builtin && (
+  1644→  1644→                        <button
+  1645→  1645→                          onClick={() => removeGroup(g.id)}
+  1646→  1646→                          className="text-[10px] text-rose-500 hover:text-rose-700 mt-0.5"
+  1647→  1647→                          title="Supprimer ce groupe"
+  1648→  1648→                        >
+  1649→  1649→                          supprimer
+  1650→  1650→                        </button>
+  1651→  1651→                      )}
+  1652→  1652→                    </div>
+  1653→  1653→                  </th>
+  1654→  1654→                ))}
+  1655→  1655→              </tr>
+  1656→  1656→            </thead>
+  1657→  1657→            <tbody>
+  1658→  1658→              {ALL_SITE_IDS.map((siteId, idx) => {
+  1659→  1659→                const meta = SITES[siteId];
+  1660→  1660→                return (
+  1661→  1661→                  <tr key={siteId} className={idx % 2 === 0 ? "bg-stone-50" : "bg-white"}>
+  1662→  1662→                    <td className={`px-2 py-1.5 text-xs sticky left-0 ${idx % 2 === 0 ? "bg-stone-50" : "bg-white"}`}>
+  1663→  1663→                      <span className={`inline-block px-1.5 py-0.5 rounded text-[11px] ${meta.accent}`}>
+  1664→  1664→                        {meta.name}
+  1665→  1665→                      </span>
+  1666→  1666→                      <span className="text-[10px] text-stone-400 ml-1">{meta.country}</span>
+  1667→  1667→                    </td>
+  1668→  1668→                    {editableGroups.map((g) => {
+  1669→  1669→                      const checked = isSiteInGroup(siteId, g);
+  1670→  1670→                      return (
+  1671→  1671→                        <td key={g.id} className="px-2 py-1.5 text-center">
+  1672→  1672→                          <input
+  1673→  1673→                            type="checkbox"
+  1674→  1674→                            checked={checked}
+  1675→  1675→                            onChange={() => toggleSiteInGroup(siteId, g.id)}
+  1676→  1676→                            className="h-4 w-4 cursor-pointer accent-stone-700"
+  1677→  1677→                            title={`${checked ? "Retirer" : "Ajouter"} ${meta.name} ${checked ? "de" : "à"} ${g.name}`}
+  1678→  1678→                          />
+  1679→  1679→                        </td>
+  1680→  1680→                      );
+  1681→  1681→                    })}
+  1682→  1682→                  </tr>
+  1683→  1683→                );
+  1684→  1684→              })}
+  1685→  1685→            </tbody>
+  1686→  1686→          </table>
+  1687→  1687→        </div>
+  1688→  1688→
+  1689→  1689→        {/* Footer : créer un nouveau groupe */}
+  1690→  1690→        <div className="border-t border-stone-200 px-5 py-3 bg-stone-50 flex items-center gap-2">
+  1691→  1691→          <span className="text-xs text-stone-600 font-medium">+ Nouveau groupe :</span>
+  1692→  1692→          <input
+  1693→  1693→            type="text"
+  1694→  1694→            placeholder="Nom (ex: Triathlon)"
+  1695→  1695→            value={newGroupName}
+  1696→  1696→            onChange={(e) => setNewGroupName(e.target.value)}
+  1697→  1697→            className="px-2 py-1 text-xs border border-stone-300 rounded w-40"
+  1698→  1698→            onKeyDown={(e) => { if (e.key === "Enter") addCustomGroup(); }}
+  1699→  1699→          />
+  1700→  1700→          <input
+  1701→  1701→            type="text"
+  1702→  1702→            placeholder="Emoji"
+  1703→  1703→            value={newGroupIcon}
+  1704→  1704→            onChange={(e) => setNewGroupIcon(e.target.value)}
+  1705→  1705→            className="px-2 py-1 text-xs border border-stone-300 rounded w-16 text-center"
+  1706→  1706→            maxLength={4}
+  1707→  1707→          />
+  1708→  1708→          <Button
+  1709→  1709→            size="sm"
+  1710→  1710→            onClick={addCustomGroup}
+  1711→  1711→            disabled={!newGroupName.trim()}
+  1712→  1712→            className="h-7 text-xs"
+  1713→  1713→          >
+  1714→  1714→            Créer
+  1715→  1715→          </Button>
+  1716→  1716→          <span className="ml-auto text-[11px] text-stone-500">
+  1717→  1717→            Une boutique peut appartenir à plusieurs groupes (ex: Decathlon dans Outdoor + Cycling)
+  1718→  1718→          </span>
+  1719→  1719→        </div>
+  1720→  1720→      </div>
+  1721→  1721→    </div>
+  1722→  1722→  );
+  1723→  1723→}
+  1724→  1724→

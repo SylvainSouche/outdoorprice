@@ -1,0 +1,25 @@
+{
+  "manifest_version": 3,
+  "name": "Shop Protocol Recorder",
+  "version": "0.13.1",
+  "description": "Records network/WebSocket activity on an e-commerce site while you search and navigate products, then generates a protocol.md you can give to an AI to write a new scraper plugin.",
+  "permissions": ["storage", "downloads"],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "devtools_page": "devtools.html",
+  "icons": {
+    "16": "icons/icon-16.png",
+    "48": "icons/icon-48.png",
+    "128": "icons/icon-128.png"
+  },
+  "action": {
+    "default_title": "Shop Protocol Recorder (open DevTools → tab 'Shop Protocol')"
+  },
+  "web_accessible_resources": [
+    {
+      "resources": ["protocol-generator.js", "vendor/jszip.min.js"],
+      "matches": ["<all_urls>"]
+    }
+  ]
+}
