@@ -48,9 +48,9 @@ make config
 ### Verify installation
 
 ```bash
-make version         # should print "0.11.5" (or current version)
+make version         # should print "0.13.1" (or current version)
 make check-env       # verify Node/Bun/npm are present
-make dev             # start dev server → http://localhost:3000
+make run-server             # start dev server → http://localhost:3000
 ```
 
 ---
@@ -86,7 +86,7 @@ DATABASE_URL=file:./db/custom.db
 # SCRAPE_CACHE_TTL_MS=120000
 ```
 
-### Debug env vars (set by `make dev-debug`)
+### Debug env vars (set by `make run-server-debug`)
 
 ```bash
 # Server-side: dump raw responses to debug/
@@ -106,9 +106,9 @@ NEXT_PUBLIC_DEBUG_DUMP=1
 ### Development server
 
 ```bash
-make dev                          # http://localhost:3000
+make run-server                          # http://localhost:3000
 # or with custom port:
-make dev PORT=3001
+make run-server PORT=3001
 ```
 
 ### Production build
@@ -145,8 +145,8 @@ bun run scripts/cli/scrape-all.ts "Dynafit" --json
 ### Starting in debug mode
 
 ```bash
-make dev-debug              # Dumps raw responses + shows debug CSV button
-make dev-debug-verbose      # Above + verbose console logging
+make run-server-debug              # Dumps raw responses + shows debug CSV button
+make run-server-debug-verbose      # Above + verbose console logging
 ```
 
 ### What debug mode does
@@ -174,7 +174,7 @@ cat debug/*/bergzeit.json   # View Bergzeit's raw response
 
 ### Using the debug CSV
 
-1. Run `make dev-debug`
+1. Run `make run-server-debug`
 2. Search for a product (e.g. "castelli giro")
 3. Click "Debug CSV catégorisé" in the sidebar
 4. Open the CSV in Excel/LibreOffice
@@ -283,7 +283,7 @@ make check-all               # lint + test
 
 ```
 download/
-├── outdoorprice-0.11.5.tar.gz          # Full project tarball
+├── outdoorprice-0.13.1.tar.gz          # Full project tarball
 ├── shop-protocol-extension-0.11.5.zip  # Chrome extension
 └── old/                                  # Previous versions
 ```
@@ -537,7 +537,7 @@ The app can run as a desktop application (macOS/Windows/Linux) using Electron. T
 ### Running in Electron (dev mode)
 
 ```bash
-make electron-dev
+make run
 ```
 
 This starts the Next.js server on port 3456 and opens an Electron window. The env var `PLAYWRIGHT_CHANNEL=chrome` is set automatically — Playwright will use your installed Google Chrome instead of bundled Chromium.
@@ -545,7 +545,7 @@ This starts the Next.js server on port 3456 and opens an Electron window. The en
 ### Building a distributable
 
 ```bash
-make electron-build
+make dist-minor
 ```
 
 This compiles the Electron main process, builds Next.js, and packages with `electron-builder`. Output goes to `dist-electron/`:

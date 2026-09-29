@@ -1,21 +1,16 @@
-// electron/main.ts — Electron main process
-// --------------------------------------------------------------------------
-// Runs Next.js IN-PROCESS (no child process). The HTTP server lives inside
-// the Electron main process — when Electron quits, everything stops.
-//
-// On quit: HTTP server closes + Playwright browsers are cleaned up.
-// --------------------------------------------------------------------------
-
 import { app, BrowserWindow, shell } from "electron";
+import type { ChildProcess } from "child_process";
+import { spawn } from "child_process";
 import * as path from "path";
-import * as http from "http";
 import * as net from "net";
+import * as http from "http";
 
 let mainWindow: BrowserWindow | null = null;
-let httpServer: http.Server | null = null;
-let nextApp: any = null;
+let serverProcess: ChildProcess | null = null;
 
-// --- Find a free port ---
+const DEBUG = process.env.ELECTRON_DEBUG === "1" || process.argv.includes("--debug");
+function dbg(msg: string) { if (DEBUG) console.log(`[debug] ${msg}`); }
+
 function findFreePort(startPort: number): Promise<number> {
   return new Promise((resolve) => {
     const srv = net.createServer();
@@ -27,46 +22,66 @@ function findFreePort(startPort: number): Promise<number> {
   });
 }
 
-// --- Start Next.js server IN-PROCESS ---
-async function startNextServer(port: number): Promise<void> {
-  const projectRoot = path.resolve(__dirname, "..");
-  const isDev = !app.isPackaged;
-
-  // Use Next.js programmatic API — runs in this process, no child process
-  const next = require("next");
-  nextApp = next({
-    dev: isDev,
-    dir: projectRoot,
-    conf: {
-      // Don't override next.config.ts — just set runtime env
-    },
-  });
-
-  await nextApp.prepare();
-  const handler = nextApp.getRequestHandler();
-
-  httpServer = http.createServer((req, res) => {
-    // Parse URL for static file serving
-    const parsedUrl = new URL(req.url || "/", `http://localhost:${port}`);
-    handler(req, res, parsedUrl);
-  });
-
+function waitForServer(port: number, retries = 60): Promise<void> {
   return new Promise((resolve, reject) => {
-    httpServer!.listen(port, "127.0.0.1", () => {
-      console.log(`[electron] Next.js server listening on http://127.0.0.1:${port}`);
-      resolve();
-    });
-    httpServer!.on("error", reject);
+    let attempts = 0;
+    const hosts = ["127.0.0.1", "0.0.0.0", "::1"];
+    let hostIdx = 0;
+    const tryConnect = () => {
+      const host = hosts[hostIdx % hosts.length];
+      hostIdx++;
+      dbg(`waitForServer: attempt ${attempts + 1}/${retries} → ${host}:${port}`);
+      const socket = net.createConnection(port, host);
+      socket.setTimeout(1000);
+      socket.on("connect", () => {
+        dbg(`waitForServer: connected via ${host}:${port}`);
+        socket.destroy();
+        resolve();
+      });
+      socket.on("error", (err) => {
+        if (++attempts >= retries * hosts.length) reject(new Error(`Server not ready: ${err.message}`));
+        else setTimeout(tryConnect, 500);
+      });
+      socket.on("timeout", () => {
+        socket.destroy();
+        if (++attempts >= retries * hosts.length) reject(new Error("Server not ready (timeout)"));
+        else setTimeout(tryConnect, 500);
+      });
+    };
+    tryConnect();
   });
 }
 
-// --- Create the main window ---
-function createWindow(url: string) {
+// Fetch the HTML content directly via HTTP — bypasses Electron's redirect handling
+function fetchPageContent(port: number): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const req = http.get(`http://127.0.0.1:${port}/`, (res) => {
+      // Follow redirects manually but stop on same-URL redirect
+      if (res.statusCode === 301 || res.statusCode === 302 || res.statusCode === 307 || res.statusCode === 308) {
+        const location = res.headers.location || "";
+        dbg(`fetchPage: got ${res.statusCode} redirect to ${location} — ignoring (same URL bug)`);
+        // Just get the body anyway — Next.js sends the body with the redirect
+      }
+      let body = "";
+      res.on("data", (chunk) => { body += chunk; });
+      res.on("end", () => {
+        dbg(`fetchPage: got ${body.length} bytes of HTML`);
+        resolve(body);
+      });
+      res.on("error", reject);
+    });
+    req.on("error", reject);
+    req.setTimeout(10000, () => {
+      req.destroy();
+      reject(new Error("fetchPage timeout"));
+    });
+  });
+}
+
+function createWindow() {
   mainWindow = new BrowserWindow({
-    width: 1400,
-    height: 900,
-    minWidth: 1024,
-    minHeight: 700,
+    width: 1400, height: 900,
+    minWidth: 1024, minHeight: 700,
     title: "OutdoorPrice",
     backgroundColor: "#fafaf9",
     webPreferences: {
@@ -77,72 +92,141 @@ function createWindow(url: string) {
     show: false,
   });
 
-  mainWindow.loadURL(url);
-  mainWindow.once("ready-to-show", () => mainWindow?.show());
+  if (DEBUG) {
+    mainWindow.webContents.openDevTools();
+  }
 
-  // Open external links in default browser
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     shell.openExternal(url);
     return { action: "deny" };
   });
-
   mainWindow.on("closed", () => { mainWindow = null; });
 }
 
-// --- Cleanup everything ---
-async function cleanup() {
-  console.log("[electron] Cleaning up...");
-  // 1. Close HTTP server (stops Next.js)
-  if (httpServer) {
-    await new Promise<void>((resolve) => {
-      httpServer!.close(() => resolve());
-    });
-    httpServer = null;
-  }
-  // 2. Close Next.js app
-  if (nextApp) {
-    try { await nextApp.close(); } catch { /* ignore */ }
-    nextApp = null;
-  }
-  // 3. Playwright browsers are cleaned up by browserPool.ts on process exit
-  //    (browser.on('disconnected') sets _browser = null)
-}
-
-// --- App lifecycle ---
 app.whenReady().then(async () => {
   const port = await findFreePort(3456);
-  console.log(`[electron] Starting Next.js on port ${port}...`);
+  console.log(`[electron] Starting server on port ${port}...`);
+  dbg(`Debug mode: ON`);
+  dbg(`Electron: ${process.versions.electron}, Node: ${process.versions.node}, Platform: ${process.platform} ${process.arch}`);
 
-  // Set env vars for the scraper engine
-  process.env.SCRAPE_PLAYWRIGHT_FALLBACK = "1";
+  const projectRoot = path.resolve(__dirname, "..");
+  dbg(`Project root: ${projectRoot}`);
+
+  const cmd = "npx";
+  const args = ["next", "dev", "-p", String(port), "-H", "0.0.0.0"];
+  dbg(`Spawning: ${cmd} ${args.join(" ")}`);
+
+  serverProcess = spawn(cmd, args, {
+    cwd: projectRoot,
+    env: {
+      ...process.env,
+      PORT: String(port),
+      HOSTNAME: "0.0.0.0",
+      NODE_ENV: "development",
+      SCRAPE_PLAYWRIGHT_FALLBACK: "1",
+    },
+    stdio: ["ignore", "pipe", "pipe"],
+    shell: false,
+  });
+
+  serverProcess.stdout?.on("data", (data: Buffer) => {
+    const msg = data.toString().trim();
+    if (msg) console.log(`[next] ${msg}`);
+  });
+  serverProcess.stderr?.on("data", (data: Buffer) => {
+    const msg = data.toString().trim();
+    if (msg) console.error(`[next] ${msg}`);
+  });
+
+  serverProcess.on("exit", (code) => {
+    console.log(`[next] Server exited with code ${code}`);
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.close();
+  });
 
   try {
-    await startNextServer(port);
+    await waitForServer(port);
+
+    // APPROACH: Load the page via Electron's loadURL but with a custom
+    // session that strips the redirect header before Chromium sees it.
+    // This is the correct fix — intercept at the network layer, not the
+    // navigation layer.
+
+    // Set up a request interceptor that strips Location headers from
+    // responses that would cause a same-URL redirect.
+    const { session } = require("electron");
+    const ses = session.defaultSession;
+
+    ses.webRequest.onHeadersReceived((details: any, callback: (response: any) => void) => {
+      const responseHeaders = details.responseHeaders || {};
+      const url = details.url;
+      const status = details.statusLine || "";
+
+      // If this is a redirect response (3xx) with Location pointing to the same host,
+      // strip the Location header to prevent the redirect
+      if (status.includes("30") && responseHeaders["Location"]) {
+        const location = Array.isArray(responseHeaders["Location"])
+          ? responseHeaders["Location"][0]
+          : responseHeaders["Location"];
+
+        if (location && location.includes("localhost")) {
+          dbg(`onHeadersReceived: stripping Location header from ${status} → ${location}`);
+          // Change status to 200 and remove Location
+          callback({
+            responseHeaders: { ...responseHeaders, Location: undefined },
+            statusLine: "HTTP/1.1 200 OK",
+          });
+          return;
+        }
+      }
+
+      callback({ responseHeaders });
+    });
+
     const url = `http://localhost:${port}`;
     console.log(`[electron] Ready at ${url}`);
-    createWindow(url);
+    createWindow();
+
+    dbg(`loadURL: ${url}`);
+    mainWindow!.loadURL(url);
+
+    mainWindow!.once("ready-to-show", () => {
+      dbg("window ready to show");
+      mainWindow?.show();
+    });
+
+    // Fallback: show after 5s
+    setTimeout(() => {
+      if (mainWindow && !mainWindow.isVisible()) {
+        dbg("Fallback: showing window after 5s");
+        mainWindow.show();
+      }
+    }, 5000);
+
   } catch (err) {
     console.error(`[electron] Failed to start: ${err}`);
     mainWindow = new BrowserWindow({ width: 600, height: 400 });
-    mainWindow.loadURL(`data:text/html,<h1>Failed to start</h1><pre>${err}</pre>`);
+    mainWindow.loadURL(`data:text/html,<h1>Failed</h1><pre>${err}</pre>`);
   }
 });
 
-// macOS: re-create window when dock icon is clicked
 app.on("activate", () => {
-  if (mainWindow === null && httpServer) {
-    createWindow(`http://localhost:3456`);
+  if (mainWindow === null && serverProcess) {
+    createWindow();
+    mainWindow?.loadURL("http://localhost:3456");
   }
 });
 
-// ALL platforms: quit when all windows are closed
-app.on("window-all-closed", () => {
-  app.quit();
-});
+app.on("window-all-closed", () => app.quit());
 
-// Cleanup on quit — stops HTTP server + Next.js + Playwright
-app.on("before-quit", async (event) => {
-  event.preventDefault();
-  await cleanup();
-  app.exit(0);
+app.on("before-quit", () => {
+  if (serverProcess) {
+    console.log("[electron] Stopping server...");
+    serverProcess.kill("SIGTERM");
+    setTimeout(() => {
+      if (serverProcess) {
+        console.log("[electron] Force killing server...");
+        serverProcess.kill("SIGKILL");
+      }
+    }, 3000);
+  }
 });

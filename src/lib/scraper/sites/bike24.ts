@@ -90,13 +90,8 @@ function parseBike24Html(html: string): ProductResult[] {
 }
 
 async function searchWithRealChrome(query: string): Promise<ProductResult[]> {
-  // Try real Chrome first (channel: "chrome" has real TLS fingerprint)
-  // Then fall back to Chromium headful
-  const { chromium } = await import("playwright-extra");
-  try {
-    const { default: StealthPlugin } = await import("puppeteer-extra-plugin-stealth");
-    chromium.use(StealthPlugin());
-  } catch { /* stealth plugin optional */ }
+  // Use playwright directly (not playwright-extra — simpler, no missing peer dep issues)
+  const { chromium } = await import("playwright");
 
   // Launch options — use bundled Chromium (Electron ships it)
   const launchOpts: any = {

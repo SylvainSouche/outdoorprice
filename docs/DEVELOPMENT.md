@@ -146,7 +146,7 @@ outdoorprice/
 User types "Dynafit" → submittedQuery set
   → useQuery fires POST /api/search
     → registry.aggregateMatched("Dynafit", { onlySites })
-      → 20 scrapers run in parallel (Phase 1: search)
+      → 22 scrapers run in parallel (Phase 1: search)
       → top 6 products per site get enriched (Phase 2: enrich)
       → all products matched cross-site (Phase 3: match)
       → filters.ts builds DynamicFilters
@@ -284,7 +284,7 @@ User types "Dynafit" → submittedQuery set
 
 ### `sites/index.ts` — Barrel file + auto-derived lookups
 
-**Role:** Imports all 20 scrapers, derives lookups.
+**Role:** Imports all 22 scrapers, derives lookups.
 
 - `SCRAPERS: Scraper[]` — array of all scrapers
 - `PLAYWRIGHT_SITES` — derived from `SCRAPERS.filter(s => s.capabilities?.usesPlaywright)`
@@ -412,12 +412,12 @@ filtered.map(p => <MatchedProductCard>)
 | Component | Purpose |
 |---|---|
 | `Home()` | Main page, holds all state |
+| `Header` | Top bar: logo, search, language switcher |
 | `MatchedProductCard` | Product card with image, badges, price, expandable offers |
 | `OfferRow` | Single offer row (site badge + price + link) |
 | `FilterSection` | Collapsible sidebar section for one facet |
 | `FilterBalloon` | Active filter pill with X |
 | `LogsPanel` | Bottom dock with error/warning/info filters |
-| `GroupMatrixModal` | Matrix popup for group management |
 | `EmptyState` | Welcome card before search |
 | `ColorSwatches` | Color circles for metadata.color |
 

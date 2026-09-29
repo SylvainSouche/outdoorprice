@@ -4,17 +4,16 @@
 # =============================================================================
 #
 # Usage :
-#   make config      → installer les prérequis et configurer le projet
-#   make install     → installer les dépendances Node
-#   make dev         → lancer le serveur de dev (http://localhost:3000)
-#   make test        → lancer les tests Vitest
-#   make lint        → vérifier la qualité du code (ESLint)
-#   make check-site  → vérifier un site seul (make check-site SITE=ekosport Q="Dynafit")
-#   make scrape-all  → scraper tous les sites (make scrape-all Q="Dynafit")
-#   make check-all   → lint + test
-#   make build       → build de production
-#   make clean       → nettoyer les artefacts
-#   make help        → cette aide
+#   make install     → installer les dépendances
+#   make run         → lancer l'app desktop (Electron)
+#   make run-server   → lancer le serveur web seulement (http://localhost:3000)
+#   make dist         → build un tarball + zip + Electron distributable
+#   make test         → lancer les tests Vitest
+#   make lint         → vérifier la qualité du code (ESLint)
+#   make check-site   → vérifier un site seul (make check-site SITE=ekosport Q="Dynafit")
+#   make clean        → nettoyer les artefacts de build
+#   make clean-all    → nettoyer TOUT (ne garder que les fichiers git)
+#   make help         → cette aide
 
 SHELL := /bin/bash
 
@@ -34,13 +33,19 @@ Y := \033[33m
 B := \033[34m
 R := \033[0m
 
-.PHONY: help config install dev dev-debug dev-debug-verbose test lint check-site scrape-all check-all build clean env playwright version release release-minor release-major
+.PHONY: help install run run-server dist clean clean-all distclean \
+	config check-env env playwright dev dev-debug dev-debug-verbose \
+	test lint check-site scrape-all check-all build version release release-minor release-major \
+	check-bergzeit check-ekosport check-glisshop check-montaz check-snowleader \
+	check-sportbittl check-sportconrad check-tradeinn check-auvieuxcampeur \
+	check-barrabes check-probikeshop check-alltricks check-deporvillage \
+	check-all4cycling check-bike24 check-bikediscount
 
 help: ## Afficher cette aide
 	@echo -e ""
 	@echo -e "$(B)OutdoorPrice$(R) - Comparateur de prix outdoor multi-sites"
 	@echo -e ""
-	@echo -e "$(G)Cibles disponibles :$(R)"
+	@echo -e "$(G)Commandes principales :$(R)"
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[33m%-15s\033[0m %s\n", $$1, $$2}'
 	@echo -e ""
 	@echo -e "$(G)Variables :$(R)"
@@ -49,14 +54,25 @@ help: ## Afficher cette aide
 	@echo -e "  PORT=$(Y)$(PORT)$(R)   (port du serveur dev)"
 	@echo -e ""
 
-config: check-env install env playwright ## Installer les prérequis et configurer le projet
+# === Installation ===
+
+install: ## Installer les dépendances
+	@echo -e "$(B)Installation des dépendances...$(R)"
+	@if [ -n "$(BUN)" ]; then \
+		bun install; \
+	else \
+		npm install; \
+	fi
+	@echo -e "$(G)✓ Dépendances installées$(R)"
+
+config: check-env install env playwright ## Installer les prérequis et configurer
 	@echo -e ""
 	@echo -e "$(G)✓ Configuration terminée$(R)"
 	@echo -e ""
 	@echo -e "Prochaines étapes :"
-	@echo -e "  1. $(Y)make dev$(R)              → lancer le serveur (http://localhost:3000)"
-	@echo -e "  2. $(Y)make check-site SITE=ekosport Q=\"Dynafit\"$(R)  → tester un site"
-	@echo -e "  3. $(Y)make test$(R)             → lancer les tests"
+	@echo -e "  1. $(Y)make run$(R)              → lancer l'app desktop (Electron)"
+	@echo -e "  2. $(Y)make run-server$(R)        → lancer le serveur web seul"
+	@echo -e "  3. $(Y)make check-site SITE=bergzeit Q=\"Dynafit\"$(R)  → tester un site"
 	@echo -e ""
 
 check-env: ## Vérifier les prérequis système
@@ -69,45 +85,42 @@ check-env: ## Vérifier les prérequis système
 	@if [ -n "$(BUN)" ]; then \
 		echo -e "  $(G)✓$(R) Bun : $$($(BUN) --version)"; \
 	else \
-		echo -e "  $(Y)⚠$(R) Bun non détecté (recommandé pour de meilleures perfs). Install : curl -fsSL https://bun.sh/install | bash"; \
+		echo -e "  $(Y)⚠$(R) Bun non détecté (recommandé). Install : curl -fsSL https://bun.sh/install | bash"; \
 	fi
-	@if [ -n "$(NPM)" ]; then \
-		echo -e "  $(G)✓$(R) npm : $$($(NPM) --version)"; \
-	fi
-
-install: ## Installer les dépendances Node
-	@echo -e "$(B)Installation des dépendances...$(R)"
-	@if [ -n "$(BUN)" ]; then \
-		bun install; \
-	else \
-		npm install; \
-	fi
-	@echo -e "$(G)✓ Dépendances installées$(R)"
 
 env: ## Créer le fichier .env depuis .env.example
 	@if [ ! -f .env ]; then \
 		cp .env.example .env; \
-		echo "$(G)✓$(R) .env créé depuis .env.example (à éditer si besoin)"; \
+		echo "$(G)✓$(R) .env créé depuis .env.example"; \
 	else \
 		echo "$(Y)⚠$(R) .env existe déjà, préservé"; \
 	fi
 
-playwright: ## Installer Chromium pour le fallback anti-bot (Cloudflare, JS-rendered)
-	@echo -e "$(B)Installation de Chromium pour Playwright (fallback anti-bot)...$(R)"
+playwright: ## Installer Chromium pour Playwright (fallback anti-bot)
+	@echo -e "$(B)Installation de Chromium pour Playwright...$(R)"
 	@if [ -n "$(BUN)" ]; then \
 		bunx playwright install chromium 2>&1 | tail -3; \
 	else \
 		npx playwright install chromium 2>&1 | tail -3; \
 	fi
-	@echo -e "$(G)✓ Chromium installé — le fallback Playwright est activé$(R)"
+	@echo -e "$(G)✓ Chromium installé$(R)"
 
-dev: ## Lancer le serveur de développement
+# === Run ===
+
+run: ## Lancer l'app desktop (Electron)
+	bunx tsc electron/main.ts electron/preload.ts --outDir electron --module commonjs --target es2020 --moduleResolution node --skipLibCheck
+	ELECTRON_DEBUG=1 npx electron electron/main.js
+
+run-server: ## Lancer le serveur web seulement (http://localhost:3000)
 	@if [ -n "$(BUN)" ]; then \
 		PORT=$(PORT) bun run dev; \
 	else \
 		PORT=$(PORT) npm run dev; \
 	fi
-dev-debug: ## Lancer en mode debug (sauvegarde les reponses brutes dans debug/)
+
+# Aliases for backward compatibility
+dev: run-server ## Alias pour run-server
+dev-debug: ## Lancer en mode debug (dump dans debug/)
 	@mkdir -p debug
 	@if [ -n "$(BUN)" ]; then \
 		DEBUG_DUMP=1 NEXT_PUBLIC_DEBUG_DUMP=1 PORT=$(PORT) bun run dev; \
@@ -115,7 +128,7 @@ dev-debug: ## Lancer en mode debug (sauvegarde les reponses brutes dans debug/)
 		DEBUG_DUMP=1 NEXT_PUBLIC_DEBUG_DUMP=1 PORT=$(PORT) npm run dev; \
 	fi
 
-dev-debug-verbose: ## Lancer en mode debug verbeux (logs + dump reponses)
+dev-debug-verbose: ## Lancer en mode debug verbeux
 	@mkdir -p debug
 	@if [ -n "$(BUN)" ]; then \
 		DEBUG_DUMP=1 DEBUG_VERBOSE=1 NEXT_PUBLIC_DEBUG_DUMP=1 NEXT_PUBLIC_DEBUG_VERBOSE=1 PORT=$(PORT) bun run dev; \
@@ -123,27 +136,46 @@ dev-debug-verbose: ## Lancer en mode debug verbeux (logs + dump reponses)
 		DEBUG_DUMP=1 DEBUG_VERBOSE=1 NEXT_PUBLIC_DEBUG_DUMP=1 NEXT_PUBLIC_DEBUG_VERBOSE=1 PORT=$(PORT) npm run dev; \
 	fi
 
-electron-dev: ## Lancer l'app Electron (dev mode — Next.js + Electron)
-	bun run electron:compile
-	bun run electron:dev
+# === Build & Distribute ===
 
-electron-build: ## Build l'app Electron (dmg/exe/AppImage)
-	@bun run electron:compile
-	@bun run next build
-	@bun run electron-builder
+build: ## Build de production (Next.js)
+	@if [ -n "$(BUN)" ]; then \
+		bun run build; \
+	else \
+		npm run build; \
+	fi
 
-version: ## Afficher la version actuelle
-	@cat VERSION
-
-release: ## Build un tarball versionne (increment release)
+dist: ## Build un tarball + zip versionné (release patch)
 	@./scripts/build-release.sh
 
-release-minor: ## Build un tarball versionne (increment minor)
+dist-minor: ## Build un tarball + zip versionné (release minor)
 	@./scripts/build-release.sh --minor
 
-release-major: ## Build un tarball versionne (increment major)
+dist-major: ## Build un tarball + zip versionné (release major)
 	@./scripts/build-release.sh --major
 
+# Aliases for backward compatibility
+release: dist ## Alias pour dist
+release-minor: dist-minor ## Alias pour dist-minor
+release-major: dist-major ## Alias pour dist-major
+
+# === Clean ===
+
+clean: ## Nettoyer les artefacts de build
+	rm -rf .next dist dev.log server.log
+	@echo -e "$(G)✓ Artefacts nettoyés$(R)"
+
+clean-all: ## Nettoyer TOUT (ne garder que les fichiers git)
+	rm -rf .next dist dev.log server.log debug/ dist-electron/ \
+		electron/*.js electron/*.js.map node_modules/.cache \
+		.next/cache tsconfig.tsbuildinfo
+	@find . -name "*.log" -not -path "./node_modules/*" -delete
+	@find . -name ".DS_Store" -not -path "./node_modules/*" -delete
+	@echo -e "$(G)✓ Nettoyage complet — seuls les fichiers git restent$(R)"
+
+distclean: clean-all ## Alias pour clean-all
+
+# === Test & Lint ===
 
 test: ## Lancer les tests Vitest
 	@if [ -n "$(BUN)" ]; then \
@@ -162,10 +194,12 @@ lint: ## Vérifier la qualité du code (ESLint)
 check-all: lint test ## Lint + tests
 	@echo -e "$(G)✓ Tout est vert$(R)"
 
+# === CLI tools ===
+
 check-site: ## Vérifier un site seul : make check-site SITE=bergzeit Q="Dynafit"
 	@if [ -z "$(SITE)" ] || [ -z "$(Q)" ]; then \
 		echo "$(R)Usage: make check-site SITE=<site-id> Q=\"<query>\"$(R)"; \
-		echo "Sites: bergzeit, ekosport, glisshop, montaz, snowleader, sportbittl, sportconrad, tradeinn, auvieuxcampeur, barrabes, probikeshop, alltricks"; \
+		echo "Sites: bergzeit, ekosport, glisshop, montaz, snowleader, sportbittl, sportconrad, tradeinn, auvieuxcampeur, barrabes, probikeshop, alltricks, telemarkpyrenees, sportokay, bergfreunde, hardloop, oliunid, varuste, deporvillage, all4cycling, bike24, bikediscount"; \
 		exit 1; \
 	fi
 	@if [ -n "$(BUN)" ]; then \
@@ -185,28 +219,11 @@ scrape-all: ## Scraper tous les sites : make scrape-all Q="Dynafit"
 		npm run scrape-all -- "$(Q)"; \
 	fi
 
-build: ## Build de production
-	@if [ -n "$(BUN)" ]; then \
-		bun run build; \
-	else \
-		npm run build; \
-	fi
+version: ## Afficher la version actuelle
+	@cat VERSION
 
-clean: ## Nettoyer les artefacts de build
-	rm -rf .next dist dev.log server.log
-	@echo -e "$(G)✓ Artefacts nettoyés$(R)"
+# === Per-site check shortcuts ===
 
-clean-all: ## Nettoyer TOUT (ne garder que les fichiers git)
-	rm -rf .next dist dev.log server.log debug/ dist-electron/ \
-		electron/*.js electron/*.js.map node_modules/.cache \
-		.next/cache tsconfig.tsbuildinfo
-	@find . -name "*.log" -not -path "./node_modules/*" -delete
-	@find . -name ".DS_Store" -not -path "./node_modules/*" -delete
-	@echo -e "$(G)✓ Nettoyage complet — seuls les fichiers git restent$(R)"
-
-distclean: clean-all ## Alias pour clean-all
-
-# Cibles spéciales pour vérifier chaque site individuellement
 check-bergzeit:       ; @$(MAKE) check-site SITE=bergzeit Q="$(Q)"
 check-ekosport:       ; @$(MAKE) check-site SITE=ekosport Q="$(Q)"
 check-glisshop:       ; @$(MAKE) check-site SITE=glisshop Q="$(Q)"
@@ -221,5 +238,5 @@ check-probikeshop:    ; @$(MAKE) check-site SITE=probikeshop Q="$(Q)"
 check-alltricks:      ; @$(MAKE) check-site SITE=alltricks Q="$(Q)"
 check-deporvillage:   ; @$(MAKE) check-site SITE=deporvillage Q="$(Q)"
 check-all4cycling:    ; @$(MAKE) check-site SITE=all4cycling Q="$(Q)"
-
-.PHONY: check-bergzeit check-ekosport check-glisshop check-montaz check-snowleader check-sportbittl check-sportconrad check-tradeinn check-auvieuxcampeur check-barrabes check-probikeshop check-alltricks check-deporvillage check-all4cycling
+check-bike24:         ; @$(MAKE) check-site SITE=bike24 Q="$(Q)"
+check-bikediscount:   ; @$(MAKE) check-site SITE=bikediscount Q="$(Q)"

@@ -30,14 +30,14 @@
 
 1. Type a product name in the search bar at the top (e.g. "Dynafit Speed Radical")
 2. Press **Enter** or click **Compare**
-3. Wait a few seconds — the app searches 20 shops in parallel
+3. Wait a few seconds — the app searches 22 shops in parallel
 4. Results appear as cards in the main area
 
 ### What happens behind the scenes
 
 ```
 You type "Dynafit"
-  → 20 shops are searched simultaneously
+  → 22 shops are searched simultaneously
   → Product pages are fetched for the top results
   → Metadata is extracted (brand, category, EAN, colors, sizes…)
   → Cross-site matching groups identical products together
@@ -112,7 +112,7 @@ In the header, click a group badge to filter which shops are searched:
 
 | Group | Description |
 |---|---|
-| **Toutes** | All 20 shops |
+| **Toutes** | All 22 shops |
 | **⛰ Outdoor** | Hiking, skiing, climbing, trail (17 shops) |
 | **🚴 Cycling** | Road, MTB, gravel cycling (4 shops) |
 | **💻 IT** | Empty (add shops via custom groups) |
@@ -275,7 +275,7 @@ Click **"Exporter CSV (N produits)"** in the sidebar to download a CSV with:
 
 ### Debug categorized CSV (debug mode only)
 
-When running in debug mode (`make dev-debug`), an additional amber button appears:
+When running in debug mode (`make run-server-debug`), an additional amber button appears:
 
 **"Debug CSV catégorisé (N produits)"**
 
@@ -372,7 +372,7 @@ A collapsible panel at the bottom of the screen shows per-site search results an
 ## 10. All Features
 
 ### Search
-- ✅ Multi-site parallel search (20 shops)
+- ✅ Multi-site parallel search (22 shops)
 - ✅ Query minimum 2 characters
 - ✅ Suggestion chips for quick searches
 - ✅ Search results cached for 2 minutes
@@ -419,10 +419,10 @@ A collapsible panel at the bottom of the screen shows per-site search results an
 - ✅ Persists in localStorage
 
 ### Debug
-- ✅ Debug mode (`make dev-debug`) with:
+- ✅ Debug mode (`make run-server-debug`) with:
   - Raw response dumps in `debug/` directory
   - Debug CSV export button
-  - Verbose console logging (`make dev-debug-verbose`)
+  - Verbose console logging (`make run-server-debug-verbose`)
 - ✅ Logs panel with level filters and site filter
 - ✅ Per-site error categorization (blocked, timeout, parse, etc.)
 

@@ -1,0 +1,575 @@
+     1→     1→     1→# Development Documentation — OutdoorPrice
+     2→     2→     2→
+     3→     3→     3→> Architecture, intermodule communication, module functions, and design choices.
+     4→     4→     4→> For installation/customization see [CONFIGURATION.md](./CONFIGURATION.md).
+     5→     5→     5→> For end-user features see [USER_GUIDE.md](./USER_GUIDE.md).
+     6→     6→     6→
+     7→     7→     7→## Table of Contents
+     8→     8→     8→
+     9→     9→     9→1. [Project Structure](#1-project-structure)
+    10→    10→    10→2. [Architecture Overview](#2-architecture-overview)
+    11→    11→    11→3. [Scraper Engine (`src/lib/scraper/`)](#3-scraper-engine)
+    12→    12→    12→4. [API Routes](#4-api-routes)
+    13→    13→    13→5. [UI Layer (`src/app/page.tsx`)](#5-ui-layer)
+    14→    14→    14→6. [Supporting Libraries](#6-supporting-libraries)
+    15→    15→    15→7. [Chrome Extension](#7-chrome-extension)
+    16→    16→    16→8. [Build & Release System](#8-build--release-system)
+    17→    17→    17→9. [Test Suite](#9-test-suite)
+    18→    18→    18→10. [Key Design Decisions](#10-key-design-decisions)
+    19→    19→    19→
+    20→    20→    20→---
+    21→    21→    21→
+    22→    22→    22→## 1. Project Structure
+    23→    23→    23→
+    24→    24→    24→```
+    25→    25→    25→outdoorprice/
+    26→    26→    26→├── src/
+    27→    27→    27→│   ├── app/                          # Next.js App Router
+    28→    28→    28→│   │   ├── api/
+    29→    29→    29→│   │   │   ├── route.ts              # GET / healthcheck
+    30→    30→    30→│   │   │   ├── groups/route.ts       # GET/POST/DELETE /api/groups
+    31→    31→    31→│   │   │   └── search/route.ts       # POST/GET /api/search (main)
+    32→    32→    32→│   │   ├── layout.tsx                # RootLayout (fonts + Providers)
+    33→    33→    33→│   │   ├── page.tsx                  # Single-page UI (2000+ lines)
+    34→    34→    34→│   │   ├── providers.tsx             # QueryClientProvider + LangProvider
+    35→    35→    35→│   │   └── globals.css
+    36→    36→    36→│   ├── components/ui/                # shadcn/ui primitives
+    37→    37→    37→│   ├── hooks/                        # use-mobile, use-toast
+    38→    38→    38→│   └── lib/
+    39→    39→    39→│       ├── cache.ts                  # In-memory LRU cache
+    40→    40→    40→│       ├── csv.ts                    # CSV export (offers + categorized)
+    41→    41→    41→│       ├── debug.ts                  # DEBUG_DUMP session writer
+    42→    42→    42→│       ├── i18n.tsx                  # FR/EN/ES/DE translations
+    43→    43→    43→│       ├── logs.ts                   # Client log buffer
+    44→    44→    44→│       ├── version.ts               # VERSION constant
+    45→    45→    45→│       └── scraper/                  # ⭐ Core scraper engine
+    46→    46→    46→│           ├── browserPool.ts        # Shared Chromium instance
+    47→    47→    47→│           ├── enrich.ts             # Product-page metadata extraction
+    48→    48→    48→│           ├── error.ts              # ScraperError v2 (typed categories)
+    49→    49→    49→│           ├── filters.ts            # DynamicFilters builder
+    50→    50→    50→│           ├── groups.ts             # Builtin + custom group management
+    51→    51→    51→│           ├── http.ts               # HTTP client + Playwright fallback
+    52→    52→    52→│           ├── matcher.ts            # Cross-site Union-Find matcher
+    53→    53→    53→│           ├── playwright.ts         # Playwright wrapper
+    54→    54→    54→│           ├── registry.ts           # Orchestrator
+    55→    55→    55→│           ├── taxonomy.ts            # Category normalizer
+    56→    56→    56→│           ├── types.ts              # Shared types + SITES record
+    57→    57→    57→│           └── sites/                 # 20 shop scrapers
+    58→    58→    58→│               ├── index.ts          # Barrel file
+    59→    59→    59→│               ├── bergzeit.ts       # ...
+    60→    60→    60→│               └── all4cycling.ts    # (20 files total)
+    61→    61→    61→├── extension/                        # Chrome DevTools extension
+    62→    62→    62→├── scripts/                          # CLI tools + build/release
+    63→    63→    63→├── tests/                            # Vitest unit tests
+    64→    64→    64→├── Makefile                          # Main entry point
+    65→    65→    65→├── package.json
+    66→    66→    66→├── next.config.ts
+    67→    67→    67→├── eslint.config.mjs
+    68→    68→    68→├── PROTOCOLES.md                     # Per-shop scraping protocols
+    69→    69→    69→├── README.md
+    70→    70→    70→├── VERSION                           # e.g. "0.11.5"
+    71→    71→    71→└── worklog.md                        # Dev journal
+    72→    72→    72→```
+    73→    73→    73→
+    74→    74→    74→---
+    75→    75→    75→
+    76→    76→    76→## 2. Architecture Overview
+    77→    77→    77→
+    78→    78→    78→```
+    79→    79→    79→┌─────────────────────────────────────────────────────────────────┐
+    80→    80→    80→│                     Browser (Client)                             │
+    81→    81→    81→│                                                                  │
+    82→    82→    82→│  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌────────────┐    │
+    83→    83→    83→│  │ Search   │  │ Sidebar  │  │ Product  │  │ Logs Panel │    │
+    84→    84→    84→│  │ Header   │  │ Filters  │  │ Grid     │  │            │    │
+    85→    85→    85→│  └────┬─────┘  └────┬─────┘  └────┬─────┘  └─────┬──────┘    │
+    86→    86→    86→│       │              │              │              │            │
+    87→    87→    87→│       └──────────────┴──────────────┴──────────────┘           │
+    88→    88→    88→│                          │ useQuery (React Query)               │
+    89→    89→    89→│                          ▼                                      │
+    90→    90→    90→│                   fetch("/api/search")                          │
+    91→    91→    91→└──────────────────────────┬──────────────────────────────────────┘
+    92→    92→    92→                           │ HTTP POST
+    93→    93→    93→                           ▼
+    94→    94→    94→┌─────────────────────────────────────────────────────────────────┐
+    95→    95→    95→│                    Next.js Server (API Route)                    │
+    96→    96→    96→│                                                                  │
+    97→    97→    97→│  /api/search/route.ts                                           │
+    98→    98→    98→│    1. Validate query + sites                                     │
+    99→    99→    99→│    2. Check in-memory cache (LRU, 2-min TTL)                    │
+   100→   100→   100→│    3. Call aggregateMatched(query, { onlySites })               │
+   101→   101→   101→│    4. Cache result + return JSON                                │
+   102→   102→   102→└──────────────────────────┬──────────────────────────────────────┘
+   103→   103→   103→                           │
+   104→   104→   104→                           ▼
+   105→   105→   105→┌─────────────────────────────────────────────────────────────────┐
+   106→   106→   106→│                    Scraper Engine (registry.ts)                   │
+   107→   107→   107→│                                                                  │
+   108→   108→   108→│  Phase 1: SEARCH (parallel)                                      │
+   109→   109→   109→│    ┌─────────┐ ┌─────────┐ ┌─────────┐ ┌─────────┐            │
+   110→   110→   110→│    │bergzeit │ │ekosport │ │glisshop│ │ ... 20   │            │
+   111→   111→   111→│    │.ts      │ │.ts      │ │.ts     │ │ scrapers  │            │
+   112→   112→   112→│    └────┬────┘ └────┬────┘ └────┬────┘ └────┬─────┘            │
+   113→   113→   113→│         │           │           │            │                    │
+   114→   114→   114→│         ▼           ▼           ▼            ▼                    │
+   115→   115→   115→│    ┌─────────────────────────────────────────────┐             │
+   116→   116→   116→│    │  http.ts (axios + Playwright fallback)       │             │
+   117→   117→   117→│    │  browserPool.ts (shared Chromium)            │             │
+   118→   118→   118→│    └─────────────────────────────────────────────┘             │
+   119→   119→   119→│                          │                                       │
+   120→   120→   120→│                          ▼ ProductResult[] (raw, per-site)      │
+   121→   121→   121→│                                                                  │
+   122→   122→   122→│  Phase 2: ENRICH (top N=6 per site)                             │
+   123→   123→   123→│    ┌─────────────────────────────────────────────┐             │
+   124→   124→   124→│    │  enrich.ts                                    │             │
+   125→   125→   125→│    │  - fetch product page                         │             │
+   126→   126→   126→│    │  - extract: JSON-LD, microdata, meta tags,   │             │
+   127→   127→   127→│    │    specs table, breadcrumbs, variations      │             │
+   128→   128→   128→│    │  - guessBrandFromTitle, classifyTaxonomy      │             │
+   129→   129→   129→│    └─────────────────────────────────────────────┘             │
+   130→   130→   130→│                          │ EnrichedItem[]                       │
+   131→   131→   131→│                          ▼                                       │
+   132→   132→   132→│  Phase 3: MATCH (cross-site grouping)                           │
+   133→   133→   133→│    ┌─────────────────────────────────────────────┐             │
+   134→   134→   134→│    │  matcher.ts (Union-Find)                      │             │
+   135→   135→   135→│    │  Cascade: EAN → vetoes → cosmetic → multi    │             │
+   136→   136→   136→│    └─────────────────────────────────────────────┘             │
+   137→   137→   137→│                          │ MatchedProduct[]                     │
+   138→   138→   138→│                          ▼                                       │
+   139→   139→   139→│  filters.ts → DynamicFilters (facets for UI)                    │
+   140→   140→   140→└─────────────────────────────────────────────────────────────────┘
+   141→   141→   141→```
+   142→   142→   142→
+   143→   143→   143→### Data flow summary
+   144→   144→   144→
+   145→   145→   145→```
+   146→   146→   146→User types "Dynafit" → submittedQuery set
+   147→   147→   147→  → useQuery fires POST /api/search
+   148→   148→   148→    → registry.aggregateMatched("Dynafit", { onlySites })
+   149→   149→   149→      → 20 scrapers run in parallel (Phase 1: search)
+   150→   150→   150→      → top 6 products per site get enriched (Phase 2: enrich)
+   151→   151→   151→      → all products matched cross-site (Phase 3: match)
+   152→   152→   152→      → filters.ts builds DynamicFilters
+   153→   153→   153→    → response cached (2-min TTL)
+   154→   154→   154→  → data.products + data.filters arrive at client
+   155→   155→   155→    → useMemo(filtered) applies client-side filters:
+   156→   156→   156→      - userOff (site checkbox toggling — no re-fetch)
+   157→   157→   157→      - onlyPromos, onlyInStock, minPrice, maxPrice, minSites
+   158→   158→   158→      - activeBrands/Categories/... (8 dynamic filter sets)
+   159→   159→   159→      - liveFilter (sidebar search field — exact-text substring match)
+   160→   160→   160→    → MatchedProductCard[] rendered
+   161→   161→   161→```
+   162→   162→   162→
+   163→   163→   163→---
+   164→   164→   164→
+   165→   165→   165→## 3. Scraper Engine
+   166→   166→   166→
+   167→   167→   167→### `types.ts` — Shared types + client-safe site registry
+   168→   168→   168→
+   169→   169→   169→**Role:** Defines all TypeScript interfaces shared between server and client. Also holds the `SITES` record (client-safe metadata only — no imports of axios/playwright).
+   170→   170→   170→
+   171→   171→   171→**Key types:**
+   172→   172→   172→- `SiteId = string` — plain string (drop-in friendly)
+   173→   173→   173→- `SiteMeta { id, name, baseUrl, country, currency, accent, groups }` — per-shop metadata
+   174→   174→   174→- `ProductResult` — raw product from a scraper
+   175→   175→   175→- `ProductMetadata` — enriched data (brand, category, ean, weight, colors, sizes, etc.)
+   176→   176→   176→- `MatchedProduct` — grouped product with multiple `ProductOffer[]`
+   177→   177→   177→- `Scraper { site, capabilities, search() }` — scraper interface
+   178→   178→   178→- `DynamicFilters` — facets for the UI sidebar
+   179→   179→   179→- `ShopGroup` — group definition
+   180→   180→   180→
+   181→   181→   181→**`SITES: Record<string, SiteMeta>`** — 20 entries with `groups` field (e.g. `groups: ["outdoor"]` or `groups: ["cycling"]` or `groups: ["outdoor", "cycling"]`). Client-safe because it contains **only data** — no function imports.
+   182→   182→   182→
+   183→   183→   183→**Design choice:** `SITES` lives in `types.ts` (not `sites/index.ts`) because the client UI (`page.tsx`) needs it for rendering badges, and importing from `sites/index.ts` would transitively pull in axios/playwright (Node-only).
+   184→   184→   184→
+   185→   185→   185→### `http.ts` — HTTP client with anti-bot headers + Playwright fallback
+   186→   186→   186→
+   187→   187→   187→**Role:** Shared HTTP layer for all HTML-based scrapers.
+   188→   188→   188→
+   189→   189→   189→**Key functions:**
+   190→   190→   190→- `pickUserAgent()` — random from 5 browser User-Agents
+   191→   191→   191→- `createHttpClient({ timeoutMs, referer })` — axios instance with realistic headers (Sec-Ch-Ua, Accept-Language, etc.)
+   192→   192→   192→- `fetchHtml(url, opts)` — main fetcher:
+   193→   193→   193→  - If `SCRAPE_USE_PLAYWRIGHT=1` → straight to Playwright
+   194→   194→   194→  - Otherwise: axios → if blocked (status ≥ 400 or HTML contains "just a moment"/"cloudflare") → retry via Playwright
+   195→   195→   195→- `parsePrice(raw)` — handles FR ("1 234,56 €"), DE ("1.234,56 EUR"), EN ("1,234.56"), Swiss ("CHF 1'234.50")
+   196→   196→   196→- `absUrl(href, base)` — relative→absolute URL resolver
+   197→   197→   197→- `cleanTitle(raw)` — collapse whitespace
+   198→   198→   198→- `fetchJsonViaPlaywright(url)` — for JSON rendered inside `<pre>` (Cloudflare-protected APIs)
+   199→   199→   199→- `fetchJsonPostViaPlaywright(apiUrl, opts)` — boots Chromium, solves Cloudflare, then runs `fetch()` inside `page.evaluate`
+   200→   200→   200→
+   201→   201→   201→**Design choices:**
+   202→   202→   202→- Robots.txt **not consulted** (personal-use tool, not a public indexer — see file header)
+   203→   203→   203→- `SCRAPE_JITTER=1` adds 200-700ms random delay to look human
+   204→   204→   204→- Proxy support via `PROXY_URL` env (HTTP/HTTPS/SOCKS5)
+   205→   205→   205→
+   206→   206→   206→### `enrich.ts` — Product page metadata extraction
+   207→   207→   207→
+   208→   208→   208→**Role:** Fetches each product page and extracts structured `ProductMetadata`.
+   209→   209→   209→
+   210→   210→   210→**Key functions:**
+   211→   211→   211→- `enrichProduct(p, signal)` — main entry, merges data from:
+   212→   212→   212→  1. **JSON-LD** (`<script type="application/ld+json">` with `@type Product`)
+   213→   213→   213→  2. **Microdata** (`[itemtype*=schema.org/Product]` + `itemprop`)
+   214→   214→   214→  3. **Meta tags** (`og:brand`, `product:gtin`, etc.)
+   215→   215→   215→  4. **Specs table** (`dl/dt/dd`, `table tr`, `.specs li`)
+   216→   216→   216→  5. **Breadcrumb** (`schema.org/BreadcrumbList`)
+   217→   217→   217→  6. **Variations** (color swatches, size selectors)
+   218→   218→   218→- `guessBrandFromTitle(title)` — scans `KNOWN_BRANDS` list (100+ brands: Dynafit, Castelli, Shimano, etc.) + model→brand inference (e.g. "Speedgoat" → "Hoka")
+   219→   219→   219→- `parseWeightGrams(raw)` — "850 g" / "1.2 kg" → grams
+   220→   220→   220→- `extractColorsFromTitle(title)` — recognizes `/<color>` suffixes, `couleur: X` patterns
+   221→   221→   221→
+   222→   222→   222→**Design choices:**
+   223→   223→   223→- Always returns an object (never throws) — on network failure, falls back to `guessBrandFromTitle(title)`
+   224→   224→   224→- `ENRICH_TOP_N_PER_SITE = 6` — only top 6 per site enriched (performance)
+   225→   225→   225→- Calls `classifyTaxonomy()` to normalize raw categories into consistent sport/category/subcategory/range
+   226→   226→   226→
+   227→   227→   227→### `matcher.ts` — Cross-site Union-Find matcher
+   228→   228→   228→
+   229→   229→   229→**Role:** Groups `ProductResult` entries from different sites into `MatchedProduct` (one logical product = multiple offers).
+   230→   230→   230→
+   231→   231→   231→**Matching cascade (in priority order):**
+   232→   232→   232→1. **Strong ID** (EAN/GTIN/MPN ≥6 chars) → score 1.0, reason "ean"
+   233→   233→   233→2. **Hard vetoes** (reject regardless of other scores):
+   234→   234→   234→   - `gender-mismatch` — "Speedgoat 7 W" vs "Speedgoat 7 M"
+   235→   235→   235→   - `product-line-mismatch` — GTX vs non-GTX, Mid vs Low, Pro vs base
+   236→   236→   236→   - `model-version-mismatch` — Speedgoat 6 vs 7
+   237→   237→   237→3. **Same-site cosmetic variant** — same brand + title Jaccard ≥ 0.85 → reason "cosmetic-variant"
+   238→   238→   238→4. **Multi-criteria cross-site score** — brand 0.30 + category 0.20 + sport 0.15 + subcategory 0.10 + range 0.10 + title sim 0.15. Match if ≥ 0.55 AND title sim ≥ 0.4
+   239→   239→   239→5. **Title-only similarity** ≥ 0.85 → reason "title-similarity"
+   240→   240→   240→6. **Brand + model tokens** — same brand + Jaccard ≥ 0.5 → reason "brand+model"
+   241→   241→   241→
+   242→   242→   242→**Design choices:**
+   243→   243→   243→- `STOP_TOKENS` strips FR/EN/DE color words, gender words, generic product nouns, outdoor colorway names
+   244→   244→   244→- `stripColorSuffix(title)` truncates at last gender marker or first `/`
+   245→   245→   245→- Union-Find with path compression
+   246→   246→   246→- Results sorted by `siteCount DESC`, then `minPrice ASC`
+   247→   247→   247→
+   248→   248→   248→### `registry.ts` — Orchestrator
+   249→   249→   249→
+   250→   250→   250→**Role:** Runs all scrapers → enriches → matches.
+   251→   251→   251→
+   252→   252→   252→**Key functions:**
+   253→   253→   253→- `aggregateSearch(query, opts)` — runs all scrapers in parallel
+   254→   254→   254→  - HTTP scrapers: concurrent with random stagger (≤800ms)
+   255→   255→   255→  - Playwright scrapers: limited to `MAX_PARALLEL_PLAYWRIGHT` (default 3) via worker-pool cursor
+   256→   256→   256→- `aggregateMatched(query, opts)` — full workflow:
+   257→   257→   257→  1. **Search phase** → `aggregateSearch()`
+   258→   258→   258→  2. **Enrich phase** → `runPool(toEnrich, 8, enrichProduct)` (8 concurrent enrichments)
+   259→   259→   259→  3. **Match phase** → `prepareItems()` → `matchProducts()`
+   260→   260→   260→  4. Returns `{ products, filters, rawResults, phases: { searchMs, enrichMs, matchMs }, anySuccess }`
+   261→   261→   261→
+   262→   262→   262→**Design choices:**
+   263→   263→   263→- `runScraperWithRetry` — aborts after `PER_SITE_TIMEOUT` (30s default, 60s for challenge sites); retries once if empty
+   264→   264→   264→- `ScraperError` caught per-site — no error crashes the aggregate
+   265→   265→   265→- **No demo fallback** — if all sites fail, response is empty
+   266→   266→   266→- `DEBUG_DUMP=1` writes raw per-site JSON + `matched.json` to `debug/`
+   267→   267→   267→
+   268→   268→   268→### `filters.ts` — DynamicFilters builder
+   269→   269→   269→
+   270→   270→   270→**Role:** Builds facet lists for the UI sidebar from `MatchedProduct[]`.
+   271→   271→   271→
+   272→   272→   272→- `buildDynamicFilters(products)` — counts brands, categories, subcategories, sports, ranges, genders, colors, sizes, attributes, priceRange. Caps each list (e.g. brands.slice(0, 30)).
+   273→   273→   273→- `normalizeSizeValue(raw)` — "42" → "eu:42", "US 10.5" → "us:10.5", "M" → "m"
+   274→   274→   274→
+   275→   275→   275→### `groups.ts` — Group management
+   276→   276→   276→
+   277→   277→   277→**Role:** Builtin group metadata + custom group persistence.
+   278→   278→   278→
+   279→   279→   279→- `DEFAULT_GROUPS` — derived from `BUILTIN_GROUP_META` + each `SITES[id].groups` field
+   280→   280→   280→- `loadCustomGroups()` / `saveCustomGroups()` — localStorage persistence
+   281→   281→   281→- `getSitesForGroup(groups, groupId)` — returns site IDs for a group
+   282→   282→   282→
+   283→   283→   283→**Design:** Adding a shop to a group = setting `groups: ["cycling"]` in `sites/<id>.ts`. No edit to `groups.ts` needed.
+   284→   284→   284→
+   285→   285→   285→### `sites/index.ts` — Barrel file + auto-derived lookups
+   286→   286→   286→
+   287→   287→   287→**Role:** Imports all 20 scrapers, derives lookups.
+   288→   288→   288→
+   289→   289→   289→- `SCRAPERS: Scraper[]` — array of all scrapers
+   290→   290→   290→- `PLAYWRIGHT_SITES` — derived from `SCRAPERS.filter(s => s.capabilities?.usesPlaywright)`
+   291→   291→   291→- `CHALLENGE_SITES` — derived from `SCRAPERS.filter(s => s.capabilities?.challenge)`
+   292→   292→   292→- `SCRAPER_BY_SITE` — `Record<siteId, Scraper>`
+   293→   293→   293→
+   294→   294→   294→### `browserPool.ts` — Shared Chromium instance
+   295→   295→   295→
+   296→   296→   296→**Role:** Single Chromium instance with reusable per-call contexts.
+   297→   297→   297→
+   298→   298→   298→- `acquireContext(referer?)` — lazily launches browser, creates new `BrowserContext`
+   299→   299→   299→- `releaseContext(context)` — closes context, keeps browser alive
+   300→   300→   300→- Anti-detection: hides `navigator.webdriver`, fakes `navigator.languages`/`plugins`/`vendor`, spoofs WebGL
+   301→   301→   301→
+   302→   302→   302→**Design:** ~80 MB total memory instead of ~80 MB × N (one browser, N contexts).
+   303→   303→   303→
+   304→   304→   304→### `playwright.ts` — Playwright wrapper
+   305→   305→   305→
+   306→   306→   306→**Role:** Fallback for JS-rendered / Cloudflare-protected sites.
+   307→   307→   307→
+   308→   308→   308→- `fetchHtmlWithPlaywright(url, opts)` — 2 attempts; waits for challenge self-resolution (up to 12s), then races for product selectors
+   309→   309→   309→- Anti-Cloudflare: never uses `networkidle` (Cloudflare keeps long-polling)
+   310→   310→   310→
+   311→   311→   311→### `taxonomy.ts` — Category normalizer
+   312→   312→   312→
+   313→   313→   313→**Role:** Normalizes raw category strings into consistent taxonomy.
+   314→   314→   314→
+   315→   315→   315→- `classifyTaxonomy(...inputs)` → `{ sport?, category?, subcategory?, range? }`
+   316→   316→   316→- `SPORT_RULES` — 12 sports (Ski de randonnée, Alpinisme, Escalade, Trail, VTT, etc.)
+   317→   317→   317→- `CATEGORY_RULES` — ~20 categories (Peaux de ski, Chaussures, Sacs à dos, etc.)
+   318→   318→   318→- `RANGE_RULES` — Compétition, Performance, Loisir, Ultralight, Freeride
+   319→   319→   319→
+   320→   320→   320→### `error.ts` — Typed scraper errors
+   321→   321→   321→
+   322→   322→   322→**Role:** Structured error class with categories for the logs panel.
+   323→   323→   323→
+   324→   324→   324→- `ScraperErrorCategory = "blocked" | "timeout" | "empty" | "network" | "parse" | "auth" | "unknown"`
+   325→   325→   325→- `ScraperError.inferCategory(message, statusCode)` — e.g. HTTP 403 → "blocked"
+   326→   326→   326→- `isRetryable()` — timeout, network, transient blocked
+   327→   327→   327→
+   328→   328→   328→---
+   329→   329→   329→
+   330→   330→   330→## 4. API Routes
+   331→   331→   331→
+   332→   332→   332→### `POST /api/search` — Main search endpoint
+   333→   333→   333→
+   334→   334→   334→**Request body:**
+   335→   335→   335→```json
+   336→   336→   336→{
+   337→   337→   337→  "query": "castelli giro",
+   338→   338→   338→  "onlySites": ["all4cycling", "probikeshop"],
+   339→   339→   339→  "group": "cycling"
+   340→   340→   340→}
+   341→   341→   341→```
+   342→   342→   342→
+   343→   343→   343→**Response:**
+   344→   344→   344→```json
+   345→   345→   345→{
+   346→   346→   346→  "query": "castelli giro",
+   347→   347→   347→  "totalProducts": 15,
+   348→   348→   348→  "products": [MatchedProduct, ...],
+   349→   349→   349→  "filters": DynamicFilters,
+   350→   350→   350→  "durationMs": 8234,
+   351→   351→   351→  "phases": { "searchMs": 3200, "enrichMs": 4100, "matchMs": 934 },
+   352→   352→   352→  "anySuccess": true,
+   353→   353→   353→  "demo": false,
+   354→   354→   354→  "sites": [{ "id": "all4cycling", "name": "All4cycling", "status": "ok", "count": 24, "durationMs": 2800 }],
+   355→   355→   355→  "cached": false
+   356→   356→   356→}
+   357→   357→   357→```
+   358→   358→   358→
+   359→   359→   359→**Key behaviors:**
+   360→   360→   360→- `query.length >= 2` required
+   361→   361→   361→- `X-Custom-Groups` header: base64 JSON of user's custom groups (server can't read localStorage)
+   362→   362→   362→- In-memory LRU cache (2-min TTL, 50 entries)
+   363→   363→   363→- If group is selected but empty → short-circuits with empty response
+   364→   364→   364→
+   365→   365→   365→### `GET/POST/DELETE /api/groups` — Group management
+   366→   366→   366→
+   367→   367→   367→- **GET** → `{ groups: [...DEFAULT_GROUPS, ...customFromHeader] }`
+   368→   368→   368→- **POST** `{ id, name, sites }` → validates, returns `{ group: ShopGroup }`
+   369→   369→   369→- **DELETE** `?id=<groupId>` → refuses builtin groups
+   370→   370→   370→
+   371→   371→   371→---
+   372→   372→   372→
+   373→   373→   373→## 5. UI Layer
+   374→   374→   374→
+   375→   375→   375→### `page.tsx` — Single-page application (2000+ lines)
+   376→   376→   376→
+   377→   377→   377→**State variables (17 total):**
+   378→   378→   378→
+   379→   379→   379→| Variable | Type | Purpose |
+   380→   380→   380→|---|---|---|
+   381→   381→   381→| `query` | string | Search input value |
+   382→   382→   382→| `submittedQuery` | string | Actually triggers useQuery |
+   383→   383→   383→| `groups` | ShopGroup[] | Builtin + custom |
+   384→   384→   384→| `activeGroupId` | string | Active group ("all" by default) |
+   385→   385→   385→| `sortKey` | SortKey | Sort order |
+   386→   386→   386→| `onlyPromos` | boolean | Filter: on-sale only |
+   387→   387→   387→| `onlyInStock` | boolean | Filter: in-stock only |
+   388→   388→   388→| `minPrice` | number\|null | Price floor |
+   389→   389→   389→| `maxPrice` | number\|null | Price ceiling |
+   390→   390→   390→| `minSites` | number | Min sites offering product |
+   391→   391→   391→| `liveFilter` | string | Free-text product filter (sidebar search field — filters displayed results without re-fetching) |
+   392→   392→   392→| `userOff` | Set<SiteId> | Deselected sites (client-side) |
+   393→   393→   393→| `showShopTree` | boolean | Treeview expand/collapse |
+   394→   394→   394→| `activeBrands` | Set<string> | Selected brands |
+   395→   395→   395→| `activeCategories` | Set<string> | Selected categories |
+   396→   396→   396→| ... (8 filter sets total) | | |
+   397→   397→   397→| `showDebug` | boolean | Unused (dead code) |
+   398→   398→   398→
+   399→   399→   399→**Data flow:**
+   400→   400→   400→```
+   401→   401→   401→query → onSubmit → submittedQuery → useQuery → data
+   402→   402→   402→                                                  ↓
+   403→   403→   403→filtered = useMemo(data.products + all filters)
+   404→   404→   404→                                                  ↓
+   405→   405→   405→filtered.map(p => <MatchedProductCard>)
+   406→   406→   406→```
+   407→   407→   407→
+   408→   408→   408→**Key design:** `selectedSites` is **NOT** in `queryKey` — toggling a site checkbox filters client-side without re-fetching.
+   409→   409→   409→
+   410→   410→   410→### Components
+   411→   411→   411→
+   412→   412→   412→| Component | Purpose |
+   413→   413→   413→|---|---|
+   414→   414→   414→| `Home()` | Main page, holds all state |
+   415→   415→   415→| `MatchedProductCard` | Product card with image, badges, price, expandable offers |
+   416→   416→   416→| `OfferRow` | Single offer row (site badge + price + link) |
+   417→   417→   417→| `FilterSection` | Collapsible sidebar section for one facet |
+   418→   418→   418→| `FilterBalloon` | Active filter pill with X |
+   419→   419→   419→| `LogsPanel` | Bottom dock with error/warning/info filters |
+   420→   420→   420→| `GroupMatrixModal` | Matrix popup for group management |
+   421→   421→   421→| `EmptyState` | Welcome card before search |
+   422→   422→   422→| `ColorSwatches` | Color circles for metadata.color |
+   423→   423→   423→
+   424→   424→   424→---
+   425→   425→   425→
+   426→   426→   426→## 6. Supporting Libraries
+   427→   427→   427→
+   428→   428→   428→### `csv.ts` — CSV export
+   429→   429→   429→
+   430→   430→   430→- `exportMatchedCsv(products)` — one row per offer (18 columns)
+   431→   431→   431→- `exportCategorizedCsv(products)` — one row per product (26 columns, debug mode)
+   432→   432→   432→- `toArray(v)` — defensive helper for non-array metadata fields
+   433→   433→   433→
+   434→   434→   434→### `i18n.tsx` — Internationalization
+   435→   435→   435→
+   436→   436→   436→- `LangProvider` — React context, persists to localStorage
+   437→   437→   437→- `useLang()` → `{ lang, setLang, t }`
+   438→   438→   438→- `t(key, params)` — supports `{param}` interpolation and `{n} word{s}` pluralization
+   439→   439→   439→- 4 languages: FR, EN, ES, DE (~60 keys each)
+   440→   440→   440→
+   441→   441→   441→### `logs.ts` — Client log buffer
+   442→   442→   442→
+   443→   443→   443→- In-memory buffer (max 500 entries, FIFO)
+   444→   444→   444→- `logInfo/logWarn/logError(site?, message)` — push entries
+   445→   445→   445→- `subscribeLogs(listener)` — pub/sub for the LogsPanel
+   446→   446→   446→- `logSearchResults(sites)` — parses API response, emits per-site logs with human-friendly error messages
+   447→   447→   447→
+   448→   448→   448→### `cache.ts` — In-memory LRU cache
+   449→   449→   449→
+   450→   450→   450→- `getCached(query, sites, group)` / `setCached(query, data, ...)`
+   451→   451→   451→- 50 entries max, 2-min TTL
+   452→   452→   452→- Key = `query | sorted-sites-csv | group`
+   453→   453→   453→
+   454→   454→   454→### `debug.ts` — Debug session writer
+   455→   455→   455→
+   456→   456→   456→- `createDebugSession(query)` → creates `debug/<timestamp>_<slug>/`
+   457→   457→   457→- `dumpSearchResults(dir, query, results)` → per-site JSON
+   458→   458→   458→- `dumpMatchedResults(dir, matched, phases)` → `matched.json`
+   459→   459→   459→
+   460→   460→   460→---
+   461→   461→   461→
+   462→   462→   462→## 7. Chrome Extension
+   463→   463→   463→
+   464→   464→   464→### Architecture
+   465→   465→   465→
+   466→   466→   466→```
+   467→   467→   467→extension/
+   468→   468→   468→├── manifest.json              # MV3, devtools_page
+   469→   469→   469→├── devtools.html/js           # Creates "Shop Protocol" DevTools panel
+   470→   470→   470→├── panel.html/js              # Panel UI + capture logic
+   471→   471→   471→├── protocol-generator.js      # Builds protocol.md from captured requests
+   472→   472→   472→├── background.js              # Minimal service worker
+   473→   473→   473→└── vendor/jszip.min.js        # Bundled JSZip for archive download
+   474→   474→   474→```
+   475→   475→   475→
+   476→   476→   476→### Capture pipeline
+   477→   477→   477→
+   478→   478→   478→1. **Record** — `chrome.devtools.network.onRequestFinished` captures all XHR/fetch/WebSocket traffic
+   479→   479→   479→2. **Categorize** — `isSearchRequest()` (sophisticated GraphQL-aware heuristic) / `isProductRequest()` (URL patterns) / WebSocket / Other
+   480→   480→   480→3. **Filter noise** — 30+ filters for analytics, Shopify telemetry, app scripts, fonts, reviews
+   481→   481→   481→4. **Auto-derive shop name** — from inspected tab URL via `chrome.devtools.inspectedWindow.eval`
+   482→   482→   482→5. **Generate protocol.md** — markdown with: sample product, JSON-LD extraction, product card HTML, field list, WS frames
+   483→   483→   483→6. **Download archive (.zip)** — protocol.md + capture.json + manifest.json + README.md + requests/ folder
+   484→   484→   484→
+   485→   485→   485→### Key heuristics
+   486→   486→   486→
+   487→   487→   487→- **GraphQL false-positive filtering** — distinguishes `query searchProducts(...)` from `query GetSlideCartOffers(...)` by inspecting operation names
+   488→   488→   488→- **HTML response handling** — 50KB limit (was 5KB), JSON-LD ItemList extraction, product card HTML extraction, result count detection from `<title>`
+   489→   489→   489→
+   490→   490→   490→---
+   491→   491→   491→
+   492→   492→   492→## 8. Build & Release System
+   493→   493→   493→
+   494→   494→   494→### `Makefile`
+   495→   495→   495→
+   496→   496→   496→| Target | Description |
+   497→   497→   497→|---|---|
+   498→   498→   498→| `make dev` | Start dev server |
+   499→   499→   499→| `make dev-debug` | Start with `DEBUG_DUMP=1 NEXT_PUBLIC_DEBUG_DUMP=1` |
+   500→   500→   500→| `make dev-debug-verbose` | Start with full debug logging |
+   501→   501→   501→| `make test` | Run Vitest |
+   502→   502→   502→| `make lint` | Run ESLint |
+   503→   503→   503→| `make check-site SITE=<id> Q="<query>"` | Test one scraper |
+   504→   504→   504→| `make scrape-all Q="<query>"` | Scrape all sites |
+   505→   505→   505→| `make release` | Bump patch version + build tarball + zip |
+   506→   506→   506→| `make release-minor` | Bump minor version |
+   507→   507→   507→| `make release-major` | Bump major version |
+   508→   508→   508→| `make build` | Production build |
+   509→   509→   509→| `make clean` | Remove .next/dist/logs |
+   510→   510→   510→
+   511→   511→   511→### `scripts/build-release.sh`
+   512→   512→   512→
+   513→   513→   513→1. Reads `VERSION`, bumps it (--patch/--minor/--major)
+   514→   514→   514→2. Writes new version to 4 files: `VERSION`, `src/lib/version.ts`, `package.json`, `extension/manifest.json`
+   515→   515→   515→3. Moves old tarballs to `download/old/`
+   516→   516→   516→4. Builds `download/outdoorprice-<version>.tar.gz` (excludes node_modules, .next, .git, etc.)
+   517→   517→   517→5. Builds `download/shop-protocol-extension-<version>.zip`
+   518→   518→   518→
+   519→   519→   519→### Versioning convention
+   520→   520→   520→
+   521→   521→   521→| Change type | Command | Example |
+   522→   522→   522→|---|---|---|
+   523→   523→   523→| Bug fix, small UI tweak | `make release` | 0.11.5 → 0.11.6 |
+   524→   524→   524→| New scraper, refactor, new feature | `make release-minor` | 0.11.5 → 0.12.0 |
+   525→   525→   525→| Breaking change | `make release-major` | 0.11.5 → 1.0.0 |
+   526→   526→   526→
+   527→   527→   527→---
+   528→   528→   528→
+   529→   529→   529→## 9. Test Suite
+   530→   530→   530→
+   531→   531→   531→| File | What it covers |
+   532→   532→   532→|---|---|
+   533→   533→   533→| `tests/http.test.ts` | `parsePrice` (FR/DE/EN/Swiss formats), `absUrl`, `cleanTitle` |
+   534→   534→   534→| `tests/matcher.test.ts` | Full matching cascade: EAN, brand+cat, gender veto, product-line veto, model-version veto, cosmetic variants, cross-site multi-criteria, title similarity |
+   535→   535→   535→| `tests/enrich.test.ts` | `guessBrandFromTitle` (100+ brands incl. cycling), `parseWeightGrams`, `extractColorsFromTitle` |
+   536→   536→   536→| `tests/taxonomy.test.ts` | `classifyTaxonomy` (sport/category/subcategory/range detection) |
+   537→   537→   537→| `tests/filters.test.ts` | `normalizeSizeValue` (EU/US/UK sizes, S/M/L) |
+   538→   538→   538→| `tests/csv.test.ts` | `exportCategorizedCsv` defensive against bad metadata |
+   539→   539→   539→
+   540→   540→   540→Run: `make test` or `bun test`
+   541→   541→   541→
+   542→   542→   542→---
+   543→   543→   543→
+   544→   544→   544→## 10. Key Design Decisions
+   545→   545→   545→
+   546→   546→   546→### 1. Drop-in scraper workflow
+   547→   547→   547→Adding a shop = 1 file + 2 one-line edits. No Makefile/groups.ts changes needed.
+   548→   548→   548→
+   549→   549→   549→### 2. Capability-driven registry
+   550→   550→   550→`PLAYWRIGHT_SITES`, `CHALLENGE_SITES`, timeouts — all derived from each scraper's `capabilities` field. No hard-coded lists.
+   551→   551→   551→
+   552→   552→   552→### 3. Three-phase pipeline
+   553→   553→   553→Search → Enrich → Match, each timed. Enrichment bounded to top-N per site (perf); all products participate in matching.
+   554→   554→   554→
+   555→   555→   555→### 4. Union-Find matcher with hard vetoes
+   556→   556→   556→Gender, product-line, model-version vetoes prevent false positives that pure weighted scoring would create.
+   557→   557→   557→
+   558→   558→   558→### 5. Client-side site filtering
+   559→   559→   559→Toggling a site checkbox filters locally without re-fetching. `queryKey` excludes `selectedSites`.
+   560→   560→   560→
+   561→   561→   561→### 6. SITES in types.ts (client-safe)
+   562→   562→   562→The `SITES` record contains only data (no function imports) so the UI can import it without pulling Node-only deps into the client bundle.
+   563→   563→   563→
+   564→   564→   564→### 7. Single shared Chromium
+   565→   565→   565→One browser instance, reusable contexts (~80 MB total vs ~80 MB × N).
+   566→   566→   566→
+   567→   567→   567→### 8. No demo fallback
+   568→   568→   568→If all sites fail, response is empty. Real errors shown.
+   569→   569→   569→
+   570→   570→   570→### 9. In-memory LRU cache
+   571→   571→   571→2-min TTL, 50 entries. Reduces redundant scrapes during rapid UI interactions.
+   572→   572→   572→
+   573→   573→   573→### 10. Self-contained release
+   574→   574→   574→`output: "standalone"` in next.config.ts. `build-release.sh` bumps 4 version files in lockstep.
+   575→   575→   575→

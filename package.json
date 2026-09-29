@@ -1,6 +1,6 @@
 {
   "name": "outdoorprice",
-  "version": "0.13.1",
+  "version": "0.14.0",
   "private": true,
   "description": "Price comparison scraper for outdoor/cycling/sports gear across 22 European shops",
   "main": "electron/main.js",
@@ -14,7 +14,7 @@
     "check-site": "bun run scripts/cli/check-site.ts",
     "scrape-all": "bun run scripts/cli/scrape-all.ts",
     "playwright:install": "playwright install chromium",
-    "electron:dev": "bun run electron:compile && cross-env electron electron/main.js",
+    "electron:dev": "bun run electron:compile && electron electron/main.js",
     "electron:build": "next build && electron-builder",
     "electron:compile": "tsc electron/main.ts electron/preload.ts --outDir electron --module commonjs --target es2020 --moduleResolution node --skipLibCheck"
   },
@@ -44,7 +44,8 @@
     "socks-proxy-agent": "^10.1.0",
     "tailwind-merge": "^3.3.1",
     "tailwindcss-animate": "^1.0.7",
-    "tw-animate-css": "^1.3.5"
+    "tw-animate-css": "^1.3.5",
+    "playwright": "^1.62.1"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
@@ -56,7 +57,6 @@
     "electron-builder": "^26.15.3",
     "eslint": "^9",
     "eslint-config-next": "^16.1.1",
-    "playwright": "^1.62.1",
     "tailwindcss": "^4",
     "typescript": "^5",
     "vitest": "^4.1.10"
@@ -77,15 +77,21 @@
     ],
     "mac": {
       "category": "public.app-category.shopping",
-      "target": ["dmg"],
+      "target": [
+        "dmg"
+      ],
       "icon": "public/logo.svg"
     },
     "win": {
-      "target": ["nsis"],
+      "target": [
+        "nsis"
+      ],
       "icon": "public/logo.svg"
     },
     "linux": {
-      "target": ["AppImage"],
+      "target": [
+        "AppImage"
+      ],
       "icon": "public/logo.svg",
       "category": "Utility"
     }

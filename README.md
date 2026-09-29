@@ -1,46 +1,50 @@
 # OutdoorPrice — Comparateur de prix outdoor multi-sites
 
-Moteur de recherche agrégatif qui interroge en parallèle **20 boutiques outdoor/cycling**,
+Moteur de recherche agrégatif qui interroge en parallèle **22 boutiques outdoor/cycling**,
 récupère les fiches produits pour en extraire les métadonnées, identifie les
 **produits similaires cross-site** pour les regrouper en une seule entrée, et
 construit des **filtres dynamiques** à partir des métadonnées extraites.
+
+Disponible en **app web** (`make run-server`) ou **app desktop Electron** (`make run`).
 
 ## 📖 Documentation
 
 | Document | Audience | Content |
 |---|---|---|
 | **[USER_GUIDE.md](./docs/USER_GUIDE.md)** | End users | How to use the comparator: simple search, filters, groups, CSV export, languages |
-| **[CONFIGURATION.md](./docs/CONFIGURATION.md)** | Developers / operators | Install, customize, run debug, test, write new shop scrapers, Chrome extension |
+| **[CONFIGURATION.md](./docs/CONFIGURATION.md)** | Developers / operators | Install, customize, run debug, test, write new shop scrapers, Chrome extension, Electron |
 | **[DEVELOPMENT.md](./docs/DEVELOPMENT.md)** | Contributors | Architecture, intermodule communication, module functions, design choices |
 | **[PROTOCOLES.md](./PROTOCOLES.md)** | AI agents / scraper authors | Per-shop scraping protocols (endpoints, selectors, gotchas) |
 
-## Sites supportés
+## Sites supportés (22)
 
-| Site | Pays | Devise | Statut live (depuis le sandbox) |
-|------|------|--------|--------------------------------|
-| Bergzeit | DE | EUR | ✅ 24 produits, 6 matchés |
-| Sport Bittl | DE | EUR | ✅ 24 produits, 6 matchés |
-| Ekosport | FR | EUR | ✅ 24 produits, 6 matchés (enrich. via Playwright) |
-| Montaz | FR | EUR | ✅ 24 produits, 6 matchés |
-| Snowleader | FR | EUR | ✅ 24 produits, 6 matchés (enrich. via Playwright) |
-| Glisshop | FR | EUR | ✅ 20 produits, 6 matchés (recherche via Playwright) |
-| Sport Conrad | DE | EUR | ❌ Makaira API 500 + Cloudflare 403 |
-| Tradeinn | ES | EUR | ❌ Cloudflare 403 (même via Playwright) |
-| Au Vieux Campeur | FR | EUR | ❌ HTTP 403 + Playwright `Failed to fetch` |
-| Barrabes | ES | EUR | ✅ via Playwright (Doofinder WS, même moteur que Glisshop) |
-| ProBikeShop | FR | EUR | ✅ via Playwright (Doofinder WS sur Shopify) |
-| Alltricks | FR | EUR | ⚠️ bloqué par Cloudflare sur /search depuis le sandbox |
-| All4cycling | FR | EUR | ✅ 24 produits en 2.6s (Shopify HTML SSR) |
+| Site | Pays | Groupe | Statut (sandbox) |
+|------|------|--------|------------------|
+| Bergzeit | DE | Outdoor | ✅ |
+| Sport Bittl | DE | Outdoor | ✅ |
+| Ekosport | FR | Outdoor | ✅ (enrich. via Playwright) |
+| Montaz | FR | Outdoor | ✅ |
+| Snowleader | FR | Outdoor | ✅ (via Playwright) |
+| Glisshop | FR | Outdoor | ✅ (via Playwright) |
+| Sport Conrad | DE | Outdoor | ❌ Makaira 500 |
+| Tradeinn | ES | Outdoor | ❌ Cloudflare 403 |
+| Au Vieux Campeur | FR | Outdoor | ❌ HTTP 403 |
+| Barrabes | ES | Outdoor | ✅ (Doofinder WS) |
+| Telemark Pyrenees | FR | Outdoor | ✅ |
+| Sportokay | DE | Outdoor | ✅ |
+| Bergfreunde | FR | Outdoor | ✅ |
+| Hardloop | FR | Outdoor | ✅ |
+| Oliunid | FR | Outdoor | ✅ (clé Algolia cachée) |
+| Varuste | FI | Outdoor | ✅ |
+| DeporVillage | FR | Outdoor + Cycling | ✅ |
+| ProBikeShop | FR | Cycling | ✅ (Doofinder WS) |
+| Alltricks | FR | Cycling | ❌ Cloudflare |
+| All4cycling | FR | Cycling | ✅ (Shopify SSR) |
+| Bike24 | DE | Cycling | ❌ Akamai (via Electron) |
+| Bike-Discount | DE | Cycling | ✅ (Shopware 6) |
 
-**7 sites fonctionnels** depuis le sandbox data-center. **4 bloqués** par
-Cloudflare/Makaira (depuis le sandbox — devraient fonctionner depuis une IP
-résidentielle). Les protocoles sont documentés dans `PROTOCOLES.md`.
-
-> Les 3 sites bloqués le sont à cause de Cloudflare ou de challenges JS que le
-> sandbox ne peut pas résoudre. Depuis une IP résidentielle, ils devraient
-> fonctionner (les protocoles sont documentés dans `PROTOCOLES.md`).
-
-L'architecture reste extensible : voir § Ajouter un site.
+**16 sites fonctionnels** depuis le sandbox. **6 bloqués** par anti-bot (Akamai/Cloudflare).
+Les sites bloqués fonctionnent depuis une IP résidentielle ou via l'app Electron.
 
 ## Workflow en 3 phases
 
@@ -113,7 +117,7 @@ Construits à partir des métadonnées extraites de tous les produits matchés :
 make config
 
 # 2. Lancer le serveur de dev
-make dev
+make run-server
 # → http://localhost:3000
 
 # 3. (autre terminal) Tester un site seul
@@ -186,7 +190,7 @@ make test
 | `make install` | Installer les dépendances Node |
 | `make env` | Créer `.env` depuis `.env.example` |
 | `make playwright` | Installer Chromium (fallback anti-bot) |
-| `make dev` | Lancer le serveur de dev (port 3000) |
+| `make run-server` | Lancer le serveur de dev (port 3000) |
 | `make test` | Lancer les tests Vitest |
 | `make lint` | ESLint |
 | `make check-all` | Lint + tests |
