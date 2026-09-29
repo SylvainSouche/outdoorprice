@@ -1,9 +1,8 @@
-import { app, BrowserWindow, shell } from "electron";
+import { app, BrowserWindow, shell, session } from "electron";
 import type { ChildProcess } from "child_process";
-import { spawn } from "child_process";
+import { spawn, fork } from "child_process";
 import * as path from "path";
 import * as net from "net";
-import * as http from "http";
 
 let mainWindow: BrowserWindow | null = null;
 let serverProcess: ChildProcess | null = null;
@@ -30,7 +29,7 @@ function waitForServer(port: number, retries = 60): Promise<void> {
     const tryConnect = () => {
       const host = hosts[hostIdx % hosts.length];
       hostIdx++;
-      dbg(`waitForServer: attempt ${attempts + 1}/${retries} → ${host}:${port}`);
+      dbg(`waitForServer: attempt ${attempts + 1}/${retries * hosts.length} → ${host}:${port}`);
       const socket = net.createConnection(port, host);
       socket.setTimeout(1000);
       socket.on("connect", () => {
@@ -38,8 +37,8 @@ function waitForServer(port: number, retries = 60): Promise<void> {
         socket.destroy();
         resolve();
       });
-      socket.on("error", (err) => {
-        if (++attempts >= retries * hosts.length) reject(new Error(`Server not ready: ${err.message}`));
+      socket.on("error", () => {
+        if (++attempts >= retries * hosts.length) reject(new Error("Server not ready"));
         else setTimeout(tryConnect, 500);
       });
       socket.on("timeout", () => {
@@ -49,32 +48,6 @@ function waitForServer(port: number, retries = 60): Promise<void> {
       });
     };
     tryConnect();
-  });
-}
-
-// Fetch the HTML content directly via HTTP — bypasses Electron's redirect handling
-function fetchPageContent(port: number): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const req = http.get(`http://127.0.0.1:${port}/`, (res) => {
-      // Follow redirects manually but stop on same-URL redirect
-      if (res.statusCode === 301 || res.statusCode === 302 || res.statusCode === 307 || res.statusCode === 308) {
-        const location = res.headers.location || "";
-        dbg(`fetchPage: got ${res.statusCode} redirect to ${location} — ignoring (same URL bug)`);
-        // Just get the body anyway — Next.js sends the body with the redirect
-      }
-      let body = "";
-      res.on("data", (chunk) => { body += chunk; });
-      res.on("end", () => {
-        dbg(`fetchPage: got ${body.length} bytes of HTML`);
-        resolve(body);
-      });
-      res.on("error", reject);
-    });
-    req.on("error", reject);
-    req.setTimeout(10000, () => {
-      req.destroy();
-      reject(new Error("fetchPage timeout"));
-    });
   });
 }
 
@@ -92,9 +65,7 @@ function createWindow() {
     show: false,
   });
 
-  if (DEBUG) {
-    mainWindow.webContents.openDevTools();
-  }
+  if (DEBUG) mainWindow.webContents.openDevTools();
 
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     shell.openExternal(url);
@@ -103,74 +74,82 @@ function createWindow() {
   mainWindow.on("closed", () => { mainWindow = null; });
 }
 
-app.whenReady().then(async () => {
-  const port = await findFreePort(3456);
-  console.log(`[electron] Starting server on port ${port}...`);
-  dbg(`Debug mode: ON`);
-  dbg(`Electron: ${process.versions.electron}, Node: ${process.versions.node}, Platform: ${process.platform} ${process.arch}`);
+async function startServer(port: number): Promise<void> {
+  const isDev = !app.isPackaged;
 
-  const projectRoot = path.resolve(__dirname, "..");
-  dbg(`Project root: ${projectRoot}`);
-
-  const cmd = "npx";
-  const args = ["next", "dev", "-p", String(port), "-H", "0.0.0.0"];
-  dbg(`Spawning: ${cmd} ${args.join(" ")}`);
-
-  serverProcess = spawn(cmd, args, {
-    cwd: projectRoot,
-    env: {
-      ...process.env,
-      PORT: String(port),
-      HOSTNAME: "0.0.0.0",
-      NODE_ENV: "development",
-      SCRAPE_PLAYWRIGHT_FALLBACK: "1",
-    },
-    stdio: ["ignore", "pipe", "pipe"],
-    shell: false,
-  });
+  if (isDev) {
+    // DEV MODE: spawn `next dev` as child process
+    const projectRoot = path.resolve(__dirname, "..");
+    dbg(`Dev mode — spawning next dev from ${projectRoot}`);
+    serverProcess = spawn("npx", ["next", "dev", "-p", String(port), "-H", "0.0.0.0"], {
+      cwd: projectRoot,
+      env: {
+        ...process.env,
+        PORT: String(port),
+        HOSTNAME: "0.0.0.0",
+        NODE_ENV: "development",
+        SCRAPE_PLAYWRIGHT_FALLBACK: "1",
+      },
+      stdio: ["ignore", "pipe", "pipe"],
+      shell: true,  // needed for npx to resolve on all platforms
+    });
+  } else {
+    // PRODUCTION MODE: run the standalone Next.js server inside the Electron process
+    // The standalone server is at .next/standalone/server.js inside the asar
+    const serverPath = path.join(process.resourcesPath, "app", ".next", "standalone", "server.js");
+    dbg(`Production mode — forking standalone server from ${serverPath}`);
+    
+    serverProcess = fork(serverPath, [], {
+      env: {
+        ...process.env,
+        PORT: String(port),
+        HOSTNAME: "0.0.0.0",
+        NODE_ENV: "production",
+        SCRAPE_PLAYWRIGHT_FALLBACK: "1",
+        // Next.js standalone needs to know where static files are
+        NEXT_PUBLIC_BASE_PATH: "",
+      },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+  }
 
   serverProcess.stdout?.on("data", (data: Buffer) => {
     const msg = data.toString().trim();
-    if (msg) console.log(`[next] ${msg}`);
+    if (msg) console.log(`[server] ${msg}`);
   });
   serverProcess.stderr?.on("data", (data: Buffer) => {
     const msg = data.toString().trim();
-    if (msg) console.error(`[next] ${msg}`);
+    if (msg) console.error(`[server] ${msg}`);
   });
 
   serverProcess.on("exit", (code) => {
-    console.log(`[next] Server exited with code ${code}`);
+    console.log(`[server] Process exited with code ${code}`);
     if (mainWindow && !mainWindow.isDestroyed()) mainWindow.close();
   });
+}
+
+app.whenReady().then(async () => {
+  const port = await findFreePort(3456);
+  console.log(`[electron] Starting server on port ${port}...`);
+  dbg(`Debug: ${DEBUG}, Packaged: ${app.isPackaged}`);
+  dbg(`Electron: ${process.versions.electron}, Node: ${process.versions.node}`);
 
   try {
+    await startServer(port);
     await waitForServer(port);
+    console.log(`[electron] Server ready on port ${port}`);
 
-    // APPROACH: Load the page via Electron's loadURL but with a custom
-    // session that strips the redirect header before Chromium sees it.
-    // This is the correct fix — intercept at the network layer, not the
-    // navigation layer.
-
-    // Set up a request interceptor that strips Location headers from
-    // responses that would cause a same-URL redirect.
-    const { session } = require("electron"); // eslint-disable-line @typescript-eslint/no-require-imports
+    // Strip same-URL redirect headers (Next.js 16 Turbopack bug)
     const ses = session.defaultSession;
-
     ses.webRequest.onHeadersReceived((details: any, callback: (response: any) => void) => {
       const responseHeaders = details.responseHeaders || {};
-      const url = details.url;
       const status = details.statusLine || "";
-
-      // If this is a redirect response (3xx) with Location pointing to the same host,
-      // strip the Location header to prevent the redirect
       if (status.includes("30") && responseHeaders["Location"]) {
         const location = Array.isArray(responseHeaders["Location"])
           ? responseHeaders["Location"][0]
           : responseHeaders["Location"];
-
-        if (location && location.includes("localhost")) {
-          dbg(`onHeadersReceived: stripping Location header from ${status} → ${location}`);
-          // Change status to 200 and remove Location
+        if (location && (location.includes("localhost") || location.includes("127.0.0.1"))) {
+          dbg(`onHeadersReceived: stripping redirect to ${location}`);
           callback({
             responseHeaders: { ...responseHeaders, Location: undefined },
             statusLine: "HTTP/1.1 200 OK",
@@ -178,32 +157,26 @@ app.whenReady().then(async () => {
           return;
         }
       }
-
       callback({ responseHeaders });
     });
 
     const url = `http://localhost:${port}`;
-    console.log(`[electron] Ready at ${url}`);
+    dbg(`Loading ${url}`);
     createWindow();
-
-    dbg(`loadURL: ${url}`);
     mainWindow!.loadURL(url);
-
     mainWindow!.once("ready-to-show", () => {
       dbg("window ready to show");
       mainWindow?.show();
     });
-
-    // Fallback: show after 5s
+    // Fallback show
     setTimeout(() => {
       if (mainWindow && !mainWindow.isVisible()) {
-        dbg("Fallback: showing window after 5s");
+        dbg("Fallback: showing window");
         mainWindow.show();
       }
     }, 5000);
-
   } catch (err) {
-    console.error(`[electron] Failed to start: ${err}`);
+    console.error(`[electron] Failed: ${err}`);
     mainWindow = new BrowserWindow({ width: 600, height: 400 });
     mainWindow.loadURL(`data:text/html,<h1>Failed</h1><pre>${err}</pre>`);
   }
@@ -222,11 +195,6 @@ app.on("before-quit", () => {
   if (serverProcess) {
     console.log("[electron] Stopping server...");
     serverProcess.kill("SIGTERM");
-    setTimeout(() => {
-      if (serverProcess) {
-        console.log("[electron] Force killing server...");
-        serverProcess.kill("SIGKILL");
-      }
-    }, 3000);
+    setTimeout(() => { if (serverProcess) serverProcess.kill("SIGKILL"); }, 3000);
   }
 });

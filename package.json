@@ -1,6 +1,6 @@
 {
   "name": "outdoorprice",
-  "version": "0.14.3",
+  "version": "0.14.4",
   "private": true,
   "description": "Price comparison scraper for outdoor/cycling/sports gear across 22 European shops",
   "main": "electron/main.js",
@@ -94,6 +94,22 @@
       ],
       "icon": "public/logo.svg",
       "category": "Utility"
-    }
+    },
+    "extraResources": [
+      {
+        "from": ".next/standalone",
+        "to": "app/.next/standalone",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
+        "from": ".next/static",
+        "to": "app/.next/static",
+        "filter": [
+          "**/*"
+        ]
+      }
+    ]
   }
 }
