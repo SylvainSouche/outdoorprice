@@ -1,6 +1,6 @@
 import { app, BrowserWindow, shell, session } from "electron";
 import type { ChildProcess } from "child_process";
-import { spawn, fork } from "child_process";
+import { spawn } from "child_process";
 import * as path from "path";
 import * as net from "net";
 
@@ -94,20 +94,20 @@ async function startServer(port: number): Promise<void> {
       shell: true,  // needed for npx to resolve on all platforms
     });
   } else {
-    // PRODUCTION MODE: run the standalone Next.js server inside the Electron process
-    // The standalone server is at .next/standalone/server.js inside the asar
+    // PRODUCTION MODE: spawn the standalone Next.js server
+    // CRITICAL: set ELECTRON_RUN_AS_NODE=1 so the Electron binary runs as plain Node.js
+    // Without this, spawning process.execPath launches another Electron window (recursive loop!)
     const serverPath = path.join(process.resourcesPath, "app", ".next", "standalone", "server.js");
-    dbg(`Production mode — forking standalone server from ${serverPath}`);
+    dbg(`Production mode — spawning standalone server from ${serverPath}`);
     
-    serverProcess = fork(serverPath, [], {
+    serverProcess = spawn(process.execPath, [serverPath], {
       env: {
         ...process.env,
+        ELECTRON_RUN_AS_NODE: "1",  // Run Electron binary as Node.js, not as GUI app
         PORT: String(port),
         HOSTNAME: "0.0.0.0",
         NODE_ENV: "production",
         SCRAPE_PLAYWRIGHT_FALLBACK: "1",
-        // Next.js standalone needs to know where static files are
-        NEXT_PUBLIC_BASE_PATH: "",
       },
       stdio: ["ignore", "pipe", "pipe"],
     });

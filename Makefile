@@ -33,7 +33,7 @@ Y := \033[33m
 B := \033[34m
 R := \033[0m
 
-.PHONY: help install run run-server dist dist-minor dist-major dist-mac dist-win dist-linux clean clean-all distclean \
+.PHONY: help install run run-server release release-minor release-major package-mac package-win package-linux clean clean-all distclean \
 	config check-env env playwright dev dev-debug dev-debug-verbose \
 	test lint check-site scrape-all check-all build version release release-minor release-major \
 	check-bergzeit check-ekosport check-glisshop check-montaz check-snowleader \
@@ -108,8 +108,8 @@ playwright: ## Installer Chromium pour Playwright (fallback anti-bot)
 # === Run ===
 
 run: ## Lancer l'app desktop (Electron)
-	bunx tsc electron/main.ts electron/preload.ts --outDir electron --module commonjs --target es2020 --moduleResolution node --skipLibCheck
-	ELECTRON_DEBUG=1 npx electron electron/main.js
+	bunx tsc electron/main.ts electron/preload.ts --outDir dist-electron-src --module commonjs --target es2020 --moduleResolution node --skipLibCheck
+	ELECTRON_DEBUG=1 npx electron dist-electron-src/main.js
 
 run-server: ## Lancer le serveur web seulement (http://localhost:3000)
 	@if [ -n "$(BUN)" ]; then \
@@ -145,41 +145,40 @@ build: ## Build de production (Next.js)
 		npm run build; \
 	fi
 
-dist: ## Build un tarball + zip versionné (release patch)
+# === Release (tarball — source code distribution) ===
+
+release: ## Build tarball + zip (patch version bump)
 	@./scripts/build-release.sh
 
-dist-minor: ## Build un tarball + zip versionné (release minor)
+release-minor: ## Build tarball + zip (minor version bump)
 	@./scripts/build-release.sh --minor
 
-dist-major: ## Build un tarball + zip versionné (release major)
+release-major: ## Build tarball + zip (major version bump)
 	@./scripts/build-release.sh --major
 
-dist-mac: ## Build un .app/.dmg macOS (Electron)
+# === Package (Electron native app — .dmg/.exe/.AppImage) ===
+
+package-mac: ## Build .app/.dmg macOS (Electron)
 	@echo -e "$(B)Building macOS .app...$(R)"
-	bunx tsc electron/main.ts electron/preload.ts --outDir electron --module commonjs --target es2020 --moduleResolution node --skipLibCheck
+	bunx tsc electron/main.ts electron/preload.ts --outDir dist-electron-src --module commonjs --target es2020 --moduleResolution node --skipLibCheck
 	bun run build
 	bunx electron-builder --mac --arm64
 	@echo -e "$(G)✓ Build terminé — voir dist-electron/$(R)"
-	@ls -la dist-electron/*.dmg dist-electron/*.app 2>/dev/null || echo "  (build output in dist-electron/)"
+	@ls -la dist-electron/*.dmg 2>/dev/null || echo "  (build output in dist-electron/)"
 
-dist-win: ## Build un .exe Windows (Electron, cross-compile depuis macOS)
+package-win: ## Build .exe Windows (Electron)
 	@echo -e "$(B)Building Windows .exe...$(R)"
-	bunx tsc electron/main.ts electron/preload.ts --outDir electron --module commonjs --target es2020 --moduleResolution node --skipLibCheck
+	bunx tsc electron/main.ts electron/preload.ts --outDir dist-electron-src --module commonjs --target es2020 --moduleResolution node --skipLibCheck
 	bun run build
 	bunx electron-builder --win
 	@echo -e "$(G)✓ Build terminé — voir dist-electron/$(R)"
 
-dist-linux: ## Build un .AppImage Linux (Electron)
+package-linux: ## Build .AppImage Linux (Electron)
 	@echo -e "$(B)Building Linux .AppImage...$(R)"
-	bunx tsc electron/main.ts electron/preload.ts --outDir electron --module commonjs --target es2020 --moduleResolution node --skipLibCheck
+	bunx tsc electron/main.ts electron/preload.ts --outDir dist-electron-src --module commonjs --target es2020 --moduleResolution node --skipLibCheck
 	bun run build
 	bunx electron-builder --linux
 	@echo -e "$(G)✓ Build terminé — voir dist-electron/$(R)"
-
-# Aliases for backward compatibility
-release: dist ## Alias pour dist
-release-minor: dist-minor ## Alias pour dist-minor
-release-major: dist-major ## Alias pour dist-major
 
 # === Clean ===
 
@@ -188,11 +187,11 @@ clean: ## Nettoyer les artefacts de build
 	@echo -e "$(G)✓ Artefacts nettoyés$(R)"
 
 clean-all: ## Nettoyer TOUT (ne garder que les fichiers git)
-	rm -rf .next dist dev.log server.log debug/ dist-electron/ \
-		electron/*.js electron/*.js.map dist-electron/ node_modules/.cache \
-		.next/cache tsconfig.tsbuildinfo
-	@find . -name "*.log" -not -path "./node_modules/*" -delete
-	@find . -name ".DS_Store" -not -path "./node_modules/*" -delete
+	@rm -rf .next dist dev.log server.log debug/ dist-electron \
+		electron/*.js electron/*.js.map node_modules/.cache \
+		.next/cache tsconfig.tsbuildinfo 2>/dev/null || true
+	@find . -name "*.log" -not -path "./node_modules/*" -delete 2>/dev/null || true
+	@find . -name ".DS_Store" -not -path "./node_modules/*" -delete 2>/dev/null || true
 	@echo -e "$(G)✓ Nettoyage complet — seuls les fichiers git restent$(R)"
 
 distclean: clean-all ## Alias pour clean-all

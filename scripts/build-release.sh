@@ -28,6 +28,12 @@ fi
 
 TARBALL="download/outdoorprice-${NEW_VERSION}.tar.gz"
 echo "Building $TARBALL ..."
+
+# Compile Electron TypeScript files before packaging
+echo "Compiling Electron main/preload..."
+bunx tsc electron/main.ts electron/preload.ts --outDir dist-electron-src --module commonjs --target es2020 --moduleResolution node --skipLibCheck 2>/dev/null || \
+npx tsc electron/main.ts electron/preload.ts --outDir dist-electron-src --module commonjs --target es2020 --moduleResolution node --skipLibCheck 2>/dev/null || true
+
 mkdir -p download/old
 for old_file in download/outdoorprice-*.tar.gz download/shop-protocol-extension-*.zip; do
   [ -f "$old_file" ] || continue

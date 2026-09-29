@@ -44,7 +44,7 @@ const eslintConfig = [...nextCoreWebVitals, ...nextTypescript, {
     "no-useless-escape": "off",
   },
 }, {
-  ignores: ["node_modules/**", ".next/**", "out/**", "build/**", "next-env.d.ts", "examples/**", "skills", "extension/vendor/**", "electron/**/*.js", "src/components/ui/carousel.tsx"]
+  ignores: ["node_modules/**", ".next/**", "out/**", "build/**", "next-env.d.ts", "examples/**", "skills", "extension/vendor/**", "dist-electron-src/**", "src/components/ui/carousel.tsx"]
 }];
 
 export default eslintConfig;
