@@ -153,7 +153,7 @@ app.whenReady().then(async () => {
 
     // Set up a request interceptor that strips Location headers from
     // responses that would cause a same-URL redirect.
-    const { session } = require("electron");
+    const { session } = require("electron"); // eslint-disable-line @typescript-eslint/no-require-imports
     const ses = session.defaultSession;
 
     ses.webRequest.onHeadersReceived((details: any, callback: (response: any) => void) => {

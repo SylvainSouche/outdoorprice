@@ -82,7 +82,7 @@ function extractInitialState(html: string): BzAppState | null {
   // Supprime le ";" final et les espaces
   body = body.replace(/\s*;?\s*$/, "");
   try {
-    // eslint-disable-next-line no-new-func
+     
     const fn = new Function(`return (${body});`);
     return fn() as BzAppState;
   } catch {

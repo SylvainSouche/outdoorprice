@@ -224,7 +224,7 @@ export const scraper: Scraper = {
       const products = await tryMakaira(query, signal);
       if (products.length) return products;
     } catch (e: any) {
-      // eslint-disable-next-line no-console
+       
       console.warn(`[sportconrad] API Makaira échouée (${e.message}), tentative HTML…`);
     }
     // 2) Repli : rend la page HTML via Playwright

@@ -105,7 +105,7 @@ export async function fetchHtmlWithPlaywright(
         msg.includes("navigation") ||
         msg.includes("closed");
       if (!isRetryable) break;
-      // eslint-disable-next-line no-console
+       
       console.warn(`[scraper/playwright] tentative ${attempt + 1} échouée (${e?.message}), retry...`);
     }
   }

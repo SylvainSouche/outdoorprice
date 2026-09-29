@@ -32,10 +32,10 @@ function getProxyAgent(): HttpsProxyAgent<string> | SocksProxyAgent | null {
     } else {
       CACHED_PROXY_AGENT = new HttpsProxyAgent(url);
     }
-    // eslint-disable-next-line no-console
+     
     console.log(`[scraper] proxy activé : ${url.replace(/:\/\/[^@]*@/, "://***@")}`);
   } catch (e) {
-    // eslint-disable-next-line no-console
+     
     console.warn(`[scraper] proxy invalide (${url}) :`, e);
     CACHED_PROXY_AGENT = null;
   }
@@ -120,7 +120,7 @@ export async function fetchHtml(
       });
     } catch (e: any) {
       if (String(e?.message || "").includes("Playwright non installé")) {
-        // eslint-disable-next-line no-console
+         
         console.warn("[scraper] Playwright non installé, fallback axios");
       } else {
         throw e;
@@ -150,7 +150,7 @@ export async function fetchHtml(
       try {
         const { fetchHtmlWithPlaywright, isPlaywrightAvailable } = await import("./playwright");
         if (await isPlaywrightAvailable()) {
-          // eslint-disable-next-line no-console
+           
           console.warn(`[scraper] axios bloqué (status=${status}) pour ${url}, retry Playwright`);
           return await fetchHtmlWithPlaywright(url, {
             timeoutMs: opts.timeoutMs ?? 20000,
@@ -160,7 +160,7 @@ export async function fetchHtml(
           });
         }
       } catch (e: any) {
-        // eslint-disable-next-line no-console
+         
         console.warn(`[scraper] Playwright fallback échoué pour ${url}: ${e?.message}`);
       }
     }
@@ -172,7 +172,7 @@ export async function fetchHtml(
       try {
         const { fetchHtmlWithPlaywright, isPlaywrightAvailable } = await import("./playwright");
         if (await isPlaywrightAvailable()) {
-          // eslint-disable-next-line no-console
+           
           console.warn(`[scraper] axios échoué (${e?.message}) pour ${url}, retry Playwright`);
           return await fetchHtmlWithPlaywright(url, {
             timeoutMs: opts.timeoutMs ?? 20000,
