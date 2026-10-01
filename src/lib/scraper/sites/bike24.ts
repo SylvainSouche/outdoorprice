@@ -13,6 +13,7 @@
 import * as cheerio from "cheerio";
 import { SiteMeta, ProductResult, Scraper } from "../types";
 import { parsePrice, absUrl, cleanTitle } from "../http";
+import { ScraperError } from "../error";
 
 export const site: SiteMeta = {
   id: "bike24",
@@ -125,7 +126,7 @@ async function searchWithRealChrome(query: string): Promise<ProductResult[]> {
 
     const title = await page.title();
     if (title.includes("Access Denied") || title.includes("Denied")) {
-      throw new Error("Akamai challenge non résolu — bike24 bloque les navigateurs automatisés.");
+      throw new ScraperError("bike24", "Akamai challenge non résolu — bike24 bloque les navigateurs automatisés.", { category: "blocked" });
     }
 
     // 2. Navigate to search results

@@ -42,6 +42,7 @@ import axios from "axios";
 import { SiteMeta, ProductResult, Scraper } from "../types";
 
 import { pickUserAgent, absUrl } from "../http";
+import { ScraperError } from "../error";
 
 interface SlMoney { value?: number; currency?: string; }
 interface SlOption { value_index?: number; label?: string; }
@@ -149,13 +150,13 @@ export const scraper: Scraper = {
       }
     );
     if (res.status === 403) {
-      throw new Error("Snowleader: HTTP 403 — ralentir les requêtes (limite anti-abus)");
+      throw new ScraperError("snowleader", "HTTP 403 — ralentir les requêtes (limite anti-abus)", { statusCode: 403, category: "blocked" });
     }
     if (res.status >= 400) {
-      throw new Error(`Snowleader: HTTP ${res.status}`);
+      throw new ScraperError("snowleader", `HTTP ${res.status}`, { statusCode: res.status, category: res.status === 403 ? "blocked" : "network" });
     }
     if (res.data?.errors?.length) {
-      throw new Error(`Snowleader GraphQL: ${res.data.errors.map((e) => e.message).join("; ")}`);
+      throw new ScraperError("snowleader", `GraphQL: ${res.data.errors.map((e) => e.message).join("; ")}`, { category: "parse" });
     }
 
     const items = res.data?.data?.products?.items ?? [];

@@ -28,6 +28,10 @@ import * as cheerio from "cheerio";
 import { SiteMeta, ProductResult, Scraper } from "../types";
 
 import { pickUserAgent, absUrl, fetchHtml, parsePrice, cleanTitle } from "../http";
+import { ScraperError } from "../error";
+import { logger } from "../../logger";
+
+const log = logger.forSite("sportconrad");
 
 interface MakairaProduct {
   fields?: {
@@ -98,7 +102,7 @@ async function tryMakaira(query: string, signal?: AbortSignal): Promise<ProductR
   });
 
   if (res.status >= 400) {
-    throw new Error(`Sport Conrad: HTTP ${res.status}`);
+    throw new ScraperError("sportconrad", `HTTP ${res.status}`, { statusCode: res.status, category: res.status === 403 ? "blocked" : "network" });
   }
 
   const items = res.data?.product?.items ?? [];
@@ -225,7 +229,7 @@ export const scraper: Scraper = {
       if (products.length) return products;
     } catch (e: any) {
        
-      console.warn(`[sportconrad] API Makaira échouée (${e.message}), tentative HTML…`);
+      log.warn(`API Makaira échouée (${e.message}), tentative HTML…`);
     }
     // 2) Repli : rend la page HTML via Playwright
     return tryHtmlFallback(query, signal);

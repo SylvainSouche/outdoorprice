@@ -1,0 +1,79 @@
+<!--
+  Fixture for tests/fixtures/all4cycling.test.ts
+  Synthetic HTML matching the Shopify theme "All4cycling v110" selectors
+  documented in src/lib/scraper/sites/all4cycling.ts.
+
+  Update needed when:
+  - all4cycling.ts selectors change (renamed class, new structure)
+  - You want to test a new edge case (sold-out, predictive fallback)
+-->
+<!DOCTYPE html>
+<html>
+<head><title>all4cycling — Castelli</title></head>
+<body>
+
+<div class="product-grid">
+
+  <!-- Product 1: in stock, no promo -->
+  <div class="card">
+    <div class="card__media">
+      <a href="/fr/products/castelli-giro-2024?_pos=1&_psq=giro&_psid=abc&_ss=e">
+        <img class="card__main-image" src="//cdn.shopify.com/giro.jpg" alt="">
+      </a>
+    </div>
+    <div class="card__info-container">
+      <div class="card__info">
+        <p class="card__vendor">Castelli</p>
+        <p class="card__title"><a href="/fr/products/castelli-giro-2024?_pos=1&_psq=giro&_psid=abc&_ss=e" aria-label="Castelli Giro 2024 Jersey">Castelli Giro 2024 Jersey</a></p>
+        <div class="price price--available">
+          <span class="price__current"><span class="js-value">€100,00</span></span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Product 2: on sale (originalPrice + discount) -->
+  <div class="card">
+    <div class="card__media">
+      <a href="/fr/products/castelli-giro-2023-jersey">
+        <img class="card__main-image" src="https://cdn.shopify.com/giro23.jpg" alt="">
+      </a>
+    </div>
+    <div class="card__info-container">
+      <div class="card__info">
+        <p class="card__vendor">Castelli</p>
+        <p class="card__title"><a href="/fr/products/castelli-giro-2023-jersey">Giro 2023 Jersey</a></p>
+        <div class="price price--on-sale">
+          <span class="price__current"><span class="js-value">€100,00</span></span>
+          <span class="price__was"><span class="js-value">€150,00</span></span>
+          <span class="price__discount">-33%</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Product 3: sold out -->
+  <div class="card">
+    <div class="card__media">
+      <a href="/fr/products/castelli-giro-2022">
+        <img class="card__main-image" src="//cdn.shopify.com/giro22.jpg" alt="">
+      </a>
+    </div>
+    <div class="card__info-container">
+      <div class="card__info">
+        <p class="card__vendor">Castelli</p>
+        <p class="card__title"><a href="/fr/products/castelli-giro-2022">Giro 2022 Jersey</a></p>
+        <div class="price price--sold-out">
+          <span class="price__current"><span class="js-value">€80,00</span></span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Noise: card__info but missing title link — should be skipped -->
+  <div class="card__info-container"><div class="card__info"></div></div>
+
+</div>
+
+</body>
+</html>

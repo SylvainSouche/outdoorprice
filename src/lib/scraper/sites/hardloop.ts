@@ -126,7 +126,7 @@ async function typesenseSearch(query: string, signal?: AbortSignal): Promise<Typ
   if (res.status === 401 || res.status === 403) {
     throw new ScraperError("hardloop", "clé Typesense refusée même après ré-extraction des chunks JS", { category: "auth" });
   }
-  if (!res.ok) throw new Error(`Typesense multi_search ${res.status}`);
+  if (!res.ok) throw new ScraperError("hardloop", `Typesense multi_search ${res.status}`, { statusCode: res.status, category: res.status === 403 ? "blocked" : "network" });
   const data = (await res.json()) as { results?: { hits?: { document: TypesenseDoc }[] }[] };
   return (data.results?.[0]?.hits ?? []).map((h) => h.document);
 }

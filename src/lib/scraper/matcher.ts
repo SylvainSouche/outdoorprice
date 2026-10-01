@@ -454,14 +454,43 @@ export function matchProducts(items: EnrichedItem[]): MatchedProduct[] {
     }
     return x;
   };
+
+  // Score/reason maps are declared BEFORE union() so the closure can read them.
+  // (Without this, the closure captures the bindings at call-time, which works
+  // due to `var`-like hoisting for `const` in function scope, but it's clearer
+  // to declare them explicitly first.)
+  const matchScores = new Map<number, number[]>();
+  const matchReasons = new Map<number, Set<string>>();
+
   const union = (a: number, b: number) => {
     const ra = find(a);
     const rb = find(b);
-    if (ra !== rb) parent[ra] = rb;
+    if (ra === rb) return;
+    parent[ra] = rb;
+    // ── P1.3 fix: merge score/reason maps when roots merge ──────────────
+    // Without this, scores stored at the old root `ra` become orphaned
+    // when `ra` is demoted (no longer a root) by this union. The final
+    // group's matchScore/matchReason would then reflect only the pairs
+    // stored at the surviving root `rb`, losing earlier pair scores.
+    const sa = matchScores.get(ra);
+    const sb = matchScores.get(rb);
+    if (sa && sb) {
+      sb.push(...sa);
+      matchScores.delete(ra);
+    } else if (sa) {
+      matchScores.set(rb, sa);
+      matchScores.delete(ra);
+    }
+    const ra_reasons = matchReasons.get(ra);
+    const rb_reasons = matchReasons.get(rb);
+    if (ra_reasons && rb_reasons) {
+      for (const r of ra_reasons) rb_reasons.add(r);
+      matchReasons.delete(ra);
+    } else if (ra_reasons) {
+      matchReasons.set(rb, ra_reasons);
+      matchReasons.delete(ra);
+    }
   };
-
-  const matchScores = new Map<number, number[]>();
-  const matchReasons = new Map<number, Set<string>>();
 
   for (let i = 0; i < n; i++) {
     for (let j = i + 1; j < n; j++) {

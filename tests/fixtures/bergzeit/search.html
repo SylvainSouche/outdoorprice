@@ -1,0 +1,87 @@
+<!--
+  Fixture for tests/fixtures/bergzeit.test.ts
+  Synthetic HTML matching the inline Vue state pattern documented in
+  src/lib/scraper/sites/bergzeit.ts.
+
+  Bergzeit does NOT serve product cards in the HTML body — it serves them
+  inside an inline JS state assignment in a <script> tag (the variable name
+  is intentionally not spelled out here so the parser's substring search
+  doesn't match this comment).
+
+  This fixture includes:
+  - 2 valid products with price + image + brand
+  - 1 product with price.old === "0,00 €" (no promo, originalPrice should be null)
+  - 1 duplicate URL (should be deduped)
+-->
+<!DOCTYPE html>
+<html>
+<head><title>bergzeit recherche — Dynafit</title></head>
+<body>
+
+<script>
+// Some unrelated JS that the parser must skip
+window.foo = "bar";
+window.addEventListener("DOMContentLoaded", function() {
+  console.log("loaded");
+});
+</script>
+
+<!-- The inline state Bergzeit's parser targets -->
+<script>window.__initialAppState = {
+  modules: {
+    productsListPage: {
+      elementsList: [
+        {
+          type: "product",
+          data: {
+            name: "Speed Radical",
+            url: "/skitouring/speed-radical",
+            sku: "DY-SR-2024",
+            brand: { name: "Dynafit" },
+            images: [
+              { alt: "Speed Radical", src: "https://cdn.bergzeit.com/img/speed-radical.jpg", title: "Speed Radical" }
+            ],
+            price: {
+              current: "450,00 €",
+              old: "0,00 €",
+              previous: "500,00 €"
+            }
+          }
+        },
+        {
+          type: "product",
+          data: {
+            name: "Melee",
+            url: "/skitouring/melee",
+            brand: { name: "Dynafit" },
+            images: [{ src: "https://cdn.bergzeit.com/img/melee.jpg" }],
+            price: {
+              current: "320,00 €",
+              old: "400,00 €"
+            }
+          }
+        },
+        {
+          type: "product",
+          data: {
+            name: "Duplicate Speed Radical (same URL — should be deduped)",
+            url: "/skitouring/speed-radical",
+            brand: { name: "Dynafit" },
+            images: [{ src: "ignored.jpg" }],
+            price: { current: "1,00 €" }
+          }
+        }
+      ]
+    }
+  }
+};</script>
+
+<!-- JSON-LD with no prices — fallback path, should NOT be reached when state is valid -->
+<script type="application/ld+json">
+[
+  { "@type": "Product", "name": "JSON-LD Product (no price)", "url": "/skitouring/jsonld-only", "image": "x.jpg" }
+]
+</script>
+
+</body>
+</html>

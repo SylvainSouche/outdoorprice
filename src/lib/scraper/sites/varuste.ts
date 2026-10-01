@@ -24,6 +24,7 @@
 import { SiteMeta, ProductResult, Scraper } from "../types";
 
 import { absUrl, parsePrice } from "../http";
+import { ScraperError } from "../error";
 
 export const site: SiteMeta = {
   id: "varuste",
@@ -51,7 +52,7 @@ export const scraper: Scraper = {
       body: new URLSearchParams({ _hakuid: "1", k_hakusana: query, referer: "" }).toString(),
       signal,
     });
-    if (!res.ok) throw new Error(`ennakoiva_tulokset ${res.status}`);
+    if (!res.ok) throw new ScraperError("varuste", `ennakoiva_tulokset ${res.status}`, { statusCode: res.status, category: res.status === 403 ? "blocked" : "network" });
     const html = await res.text();
 
     const items = html.match(/<a class="ajaxlinkki item"[^>]*>[\s\S]*?<\/a>/g) ?? [];

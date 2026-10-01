@@ -49,9 +49,11 @@
 // --------------------------------------------------------------------------
 import { SiteMeta, ProductResult, Scraper } from "../types";
 
-import { ScraperError } from "../error";
-
 import { absUrl, parsePrice, cleanTitle } from "../http";
+import { ScraperError } from "../error";
+import { logger } from "../../logger";
+
+const log = logger.forSite("alltricks");
 
 /** Attend que Cloudflare se résolve (la page title passe de "Un instant…" à
  *  un titre normal). Retourne true si cleared, false si timeout.
@@ -93,7 +95,7 @@ async function waitForCloudflare(page: any, timeoutMs?: number): Promise<boolean
     // page de résultats chargée (peut être /search, /Acheter/<query>, etc.)
     return true;
   }
-  console.log(`[alltricks] non résolu après ${earlyTimeoutMs / 1000}s (URL: ${lastUrl}, titre: "${lastTitle}")`);
+  log.debug(`non résolu après ${earlyTimeoutMs / 1000}s (URL: ${lastUrl}, titre: "${lastTitle}")`);
   return false;
 }
 
@@ -107,7 +109,7 @@ interface AlltricksCard {
 
 async function loadAndSearch(query: string, signal?: AbortSignal): Promise<AlltricksCard[]> {
   const pw = await import("playwright" as any).catch(() => null);
-  if (!pw) throw new Error("Playwright non installé");
+  if (!pw) throw new ScraperError("alltricks", "Playwright non installé", { category: "unknown" });
   const chromium = pw.chromium;
   const t0 = Date.now();
   const log = (msg: string) => console.log(`[alltricks] +${Date.now() - t0}ms ${msg}`);
@@ -210,11 +212,12 @@ async function loadAndSearch(query: string, signal?: AbortSignal): Promise<Alltr
         } catch { /* vraiment absent */ }
       }
       if (!inputReady) {
-        throw new Error(
+        throw new ScraperError(
+          "alltricks",
           cleared
             ? "Champ de recherche introuvable sur /recherche (le site a probablement changé)"
-            : "Cloudflare bloque même /recherche — le challenge ne se dissipe pas. " +
-              "Essayez SCRAPE_HEADED=1 (Chrome visible) ou une autre IP."
+            : "Cloudflare bloque même /recherche — le challenge ne se dissipe pas. Essayez SCRAPE_HEADED=1 (Chrome visible) ou une autre IP.",
+          { category: cleared ? "parse" : "blocked" }
         );
       }
     }
@@ -316,15 +319,16 @@ async function loadAndSearch(query: string, signal?: AbortSignal): Promise<Alltr
       // Vérifier le titre pour un message plus précis
       const title = await page.title().catch(() => "");
       if (title.toLowerCase().includes("instant") || title.toLowerCase().includes("moment")) {
-        throw new Error(
-          `Cloudflare challenge non résolu après ${parseInt(process.env.SCRAPE_CLOUDFLARE_TIMEOUT_MS || "20000", 10) / 1000}s — ` +
-          `le site /search bloque les IP data-center. Fonctionne depuis une IP résidentielle. ` +
-          `Augmentez SCRAPE_CLOUDFLARE_TIMEOUT_MS si vous êtes sur IP rési et le challenge est lent.`
+        throw new ScraperError(
+          "alltricks",
+          `Cloudflare challenge non résolu après ${parseInt(process.env.SCRAPE_CLOUDFLARE_TIMEOUT_MS || "20000", 10) / 1000}s — le site /search bloque les IP data-center. Fonctionne depuis une IP résidentielle. Augmentez SCRAPE_CLOUDFLARE_TIMEOUT_MS si vous êtes sur IP rési et le challenge est lent.`,
+          { category: "blocked" }
         );
       }
-      throw new Error(
-        `Page de résultats non chargée après ${parseInt(process.env.SCRAPE_CLOUDFLARE_TIMEOUT_MS || "20000", 10) / 1000}s — ` +
-        `peut-être une navigation interrompue ou un changement de structure.`
+      throw new ScraperError(
+        "alltricks",
+        `Page de résultats non chargée après ${parseInt(process.env.SCRAPE_CLOUDFLARE_TIMEOUT_MS || "20000", 10) / 1000}s — peut-être une navigation interrompue ou un changement de structure.`,
+        { category: "timeout" }
       );
     }
 

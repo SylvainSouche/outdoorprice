@@ -424,4 +424,81 @@ describe("matchProducts", () => {
     expect(matched).toHaveLength(1);
     expect(matched[0].offers).toHaveLength(2);
   });
+
+  // -------------------------------------------------------------------------
+  // P1.3 — Anti-conflation split: scores must be re-aggregated when Union-Find
+  //        merges groups transitively. Without the fix, scores stored at an
+  //        intermediate root become orphaned when that root is later demoted
+  //        by a subsequent union, and the final matchScore / matchReason
+  //        reflect only the last union's pair — not all matching pairs in
+  //        the group.
+  // -------------------------------------------------------------------------
+  it("P1.3: aggregates matchScore across all pairs when groups merge transitively", () => {
+    // 3 items on 3 different sites:
+    //   A (bergzeit)   — has EAN + brand+category+sport (strong metadata)
+    //   B (sportbittl) — has same EAN as A  → match score 1.0
+    //   C (snowleader) — has NO EAN, but same brand+category+sport+title tokens as A → multi match ~0.7
+    //
+    // Pairwise:
+    //   A-B: matched, score 1.0,  reason "ean"
+    //   A-C: matched, score ~0.7, reason "multi:brand+category+sport+title"
+    //   B-C: B has no title tokens overlapping with C (B has extra "Skitouring" word) — may or may not match
+    //
+    // Expected after fix:
+    //   - All 3 items in one group (transitive union)
+    //   - matchScore = average of ALL pairwise scores in the group (at least A-B + A-C)
+    //   - matchReason contains BOTH "ean" AND "multi:..."
+    //
+    // Buggy behavior (before fix):
+    //   - matchScore = only the LAST union's pair score (e.g. 0.7)
+    //   - matchReason = only "multi:..." (the "ean" reason from the first pair is lost)
+    const products = [
+      makeProduct("bergzeit",   "Dynafit Speed Radical", 500),
+      makeProduct("sportbittl", "Dynafit Speed Radical", 520),
+      makeProduct("snowleader", "Dynafit Speed Radical Skitouring", 540),
+    ];
+    const metas = [
+      // A: full metadata (EAN + brand + category + sport)
+      makeMetadata({
+        ean: "1234567890123",
+        brand: "Dynafit",
+        category: "Skins",
+        sport: "Ski de randonnée",
+      }),
+      // B: same EAN as A → guaranteed strong match A-B
+      makeMetadata({
+        ean: "1234567890123",
+        brand: "Dynafit",
+        category: "Skins",
+        sport: "Ski de randonnée",
+      }),
+      // C: no EAN, but same brand+category+sport → multi-criteria match with A
+      makeMetadata({
+        brand: "Dynafit",
+        category: "Skins",
+        sport: "Ski de randonnée",
+      }),
+    ];
+    const items = prepareItems(products, metas);
+    const matched = matchProducts(items);
+
+    // Sanity: all 3 should be in one group
+    expect(matched).toHaveLength(1);
+    expect(matched[0].offers).toHaveLength(3);
+
+    // BUG CHECK 1: matchReason must include BOTH "ean" and "multi:..."
+    // Buggy version would only have one of them (whichever union happened last).
+    expect(matched[0].matchReason).toBeDefined();
+    expect(matched[0].matchReason).toContain("ean");
+    expect(matched[0].matchReason).toContain("multi:");
+
+    // BUG CHECK 2: matchScore must reflect BOTH pairs (1.0 + ~0.7 = avg ~0.85)
+    // Buggy version would be just 1.0 (if last union was A-B) or just 0.7 (if last was A-C).
+    // Correct: avg of [1.0, multi_score, ...] — multi_score is at least 0.55 (threshold).
+    // So matchScore should be ≥ 0.55 and < 1.0 (because there are mixed scores).
+    expect(matched[0].matchScore).toBeGreaterThanOrEqual(0.55);
+    expect(matched[0].matchScore).toBeLessThan(1.0);
+    // The "ean" pair contributes 1.0, so the average should be > 0.7 (just multi alone)
+    expect(matched[0].matchScore).toBeGreaterThan(0.7);
+  });
 });

@@ -60,7 +60,7 @@ interface BzAppState {
 }
 
 /** Extrait window.__initialAppState du HTML servie. */
-function extractInitialState(html: string): BzAppState | null {
+export function extractInitialState(html: string): BzAppState | null {
   // Le state est sérialisé sous la forme :
   //   <script>window.__initialAppState = { ... };</script>
   // Attention : c'est un objet littéral JavaScript (clés non quotées,

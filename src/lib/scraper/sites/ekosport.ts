@@ -34,6 +34,9 @@ import axios from "axios";
 import { SiteMeta, ProductResult, Scraper } from "../types";
 
 import { pickUserAgent, absUrl, fetchJsonViaPlaywright } from "../http";
+import { ScraperError } from "../error";
+import { queryAlgolia } from "../algoliaClient";
+import { logger } from "../../logger";
 
 interface AlgoliaConfig {
   data?: {
@@ -96,7 +99,7 @@ async function fetchAlgoliaConfig(): Promise<{ appId: string; indexName: string 
   })) as AlgoliaConfig;
   const appId = data?.data?.applicationID || data?.data?.appId || "";
   const indexName = data?.data?.indexName || DEFAULT_INDEX;
-  if (!appId) throw new Error("Ekosport: applicationID Algolia manquant");
+  if (!appId) throw new ScraperError("ekosport", "applicationID Algolia manquant", { category: "auth" });
   return { appId, indexName };
 }
 
@@ -106,7 +109,7 @@ async function fetchApiKey(): Promise<string> {
     referer: `${site.baseUrl}/`,
   })) as AlgoliaKey;
   const apiKey = data?.data?.apiKey;
-  if (!apiKey) throw new Error("Ekosport: clé API Algolia manquante");
+  if (!apiKey) throw new ScraperError("ekosport", "clé API Algolia manquante", { category: "auth" });
   return apiKey;
 }
 
@@ -146,39 +149,28 @@ export const scraper: Scraper = {
       "genre",
     ].join(",");
 
-    const params = new URLSearchParams({
-      query,
-      hitsPerPage: "24",
-      page: "0",
-      attributesToRetrieve,
-    });
-
-    const body = {
-      requests: [
-        { indexName, params: params.toString() },
-      ],
-    };
-
-    const algoliaUrl = `https://${appId}-dsn.algolia.net/1/indexes/*/queries`;
-    const ua = pickUserAgent();
-    const res = await axios.post<AlgoliaResponse>(algoliaUrl, body, {
-      headers: {
-        "Content-Type": "application/json",
-        Accept: "application/json",
-        "X-Algolia-Application-Id": appId,
-        "X-Algolia-API-Key": apiKey,
-        "User-Agent": ua,
-        "Accept-Language": "fr-FR,fr;q=0.9",
+    const data = await queryAlgolia(
+      {
+        siteId: "ekosport",
+        appId,
+        apiKey,
+        referer: `${site.baseUrl}/`,
+        signal,
       },
-      timeout: 25000,
-      signal,
-      validateStatus: (s) => s < 500,
-    });
-    if (res.status >= 400) {
-      throw new Error(`Ekosport Algolia: HTTP ${res.status}`);
-    }
+      [
+        {
+          indexName,
+          params: {
+            query,
+            hitsPerPage: 24,
+            page: 0,
+            attributesToRetrieve,
+          },
+        },
+      ]
+    );
 
-    const hits = res.data?.results?.[0]?.hits ?? [];
+    const hits = data.results?.[0]?.hits ?? [];
     const products: ProductResult[] = [];
     const seen = new Set<string>();
 

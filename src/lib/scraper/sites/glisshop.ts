@@ -30,6 +30,7 @@
 import { SiteMeta, ProductResult, Scraper } from "../types";
 
 import { absUrl } from "../http";
+import { ScraperError } from "../error";
 
 interface DfdCard {
   link: string | null;
@@ -43,7 +44,7 @@ interface DfdCard {
 
 async function loadAndQueryDfd(query: string, signal?: AbortSignal): Promise<DfdCard[]> {
   const pw = await import("playwright" as any).catch(() => null);
-  if (!pw) throw new Error("Playwright non installé");
+  if (!pw) throw new ScraperError("glisshop", "Playwright non installé", { category: "unknown" });
   const chromium = pw.chromium;
 
   const launchOpts: any = {

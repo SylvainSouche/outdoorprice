@@ -16,6 +16,7 @@ import {
   dumpMatchedResults,
   debugLog,
 } from "../debug";
+import { logger } from "../logger";
 
 // Re-export for backwards compatibility
 export { SCRAPERS, SCRAPER_BY_SITE };
@@ -67,7 +68,7 @@ async function runScraperWithRetry(
 
     // Retry once on empty (rate-limit recovery)
     if ((!products || products.length === 0) && !controller.signal.aborted) {
-      console.log(`[scraper] ${scraper.site.id} retourné vide, retry dans ${RETRY_DELAY_MS}ms...`);
+      logger.forSite(scraper.site.id).info(`retourné vide, retry dans ${RETRY_DELAY_MS}ms...`);
       await sleep(RETRY_DELAY_MS);
       // New controller for retry
       const retryController = new AbortController();

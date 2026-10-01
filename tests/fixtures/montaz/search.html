@@ -1,0 +1,58 @@
+<!--
+  Fixture for tests/fixtures/montaz.test.ts
+  Synthetic HTML that matches the selectors documented in src/lib/scraper/sites/montaz.ts.
+
+  Why synthetic instead of real captured HTML:
+  - Real captures bloat the repo (~150KB each) and may contain personal tokens.
+  - Synthetic fixtures let us exercise every code branch (promo, no-promo,
+    out-of-stock) on purpose with tiny, readable HTML.
+
+  Update needed when:
+  - montaz.ts selectors change (rename a data-* attribute, add a new one)
+  - You want to test a new edge case (add a new <div class="product-card-image">)
+-->
+<!DOCTYPE html>
+<html>
+<head><title>montaz recherche — Dynafit</title></head>
+<body>
+
+<!-- Product 1: simple, no promo -->
+<div class="product-card-image"
+     data-product="dynafit-speed-radical"
+     data-name="Speed Radical"
+     data-prix-final="450,00 €"
+     data-prix-unitaire="450,00 €"
+     data-marque="Dynafit"
+     data-link="/produit/dynafit-speed-radical.html"
+     data-img="https://cdn.montaz.com/img/speed-radical.jpg">
+</div>
+
+<!-- Product 2: with promo (originalPrice > price, discount computed) -->
+<div class="product-card-image"
+     data-product="dynafit-melee"
+     data-name="Melee"
+     data-prix-final="320,00 €"
+     data-prix-unitaire="400,00 €"
+     data-marque="Dynafit"
+     data-link="/produit/dynafit-melee.html"
+     data-img="/img/melee.jpg">
+</div>
+
+<!-- Product 3: no data-prix-final (only data-product) — should still be found -->
+<div class="product-card-image"
+     data-product="dynafit-pkg-rt"
+     data-name="PKG RT"
+     data-prix-unitaire="700,00 €"
+     data-marque="Dynafit"
+     data-link="/produit/dynafit-pkg-rt.html"
+     data-img="https://cdn.montaz.com/img/pkg-rt.jpg">
+</div>
+
+<!-- Noise: not a product card (no data-prix-final, no data-product) -->
+<div class="product-card-image" data-name="ignored"></div>
+
+<!-- Noise: not a product-card-image at all -->
+<div class="something-else" data-name="ignored"></div>
+
+</body>
+</html>

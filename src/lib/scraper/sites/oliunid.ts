@@ -22,6 +22,8 @@ import { ScraperError } from "../error";
 import { SiteMeta, ProductResult, Scraper } from "../types";
 
 import { fetchHtml, absUrl } from "../http";
+import { queryAlgolia } from "../algoliaClient";
+import { logger } from "../../logger";
 
 const ALGOLIA_APP_ID = "NHLOO6WTIO";
 
@@ -57,6 +59,39 @@ async function fetchAlgoliaKey(signal?: AbortSignal, forceRefresh = false): Prom
   return key;
 }
 
+/** Extrait la liste de ProductResult depuis les hits Algolia.
+ *  Pure function, extracted so it can be unit-tested. */
+function extractProducts(hits: AlgoliaHit[]): ProductResult[] {
+  const products: ProductResult[] = [];
+  const seen = new Set<string>();
+  for (const h of hits) {
+    if (!h.name || !h.url) continue;
+    const url = absUrl(h.url, site.baseUrl);
+    if (!url || seen.has(url)) continue;
+    seen.add(url);
+    const price = h.price?.EUR?.default ?? null;
+    const original = h.price?.EUR?.default_original ?? null;
+    const discount = price !== null && original !== null && original > price
+      ? Math.round((1 - price / original) * 100)
+      : null;
+    products.push({
+      site: "oliunid",
+      siteName: site.name,
+      title: h.manufacturer && !h.name.toLowerCase().startsWith(h.manufacturer.toLowerCase())
+        ? `${h.manufacturer} ${h.name}`
+        : h.name,
+      url,
+      price,
+      originalPrice: discount !== null ? original : null,
+      currency: "EUR",
+      image: absUrl(h.image_url ?? null, site.baseUrl),
+      availability: "unknown",
+      discount,
+    });
+  }
+  return products;
+}
+
 export const site: SiteMeta = {
   id: "oliunid",
   name: "Oliunid",
@@ -71,65 +106,59 @@ export const scraper: Scraper = {
   site,
     capabilities: { engine: "algolia" },
   async search(query, signal) {
-    const doQuery = (apiKey: string) =>
-      fetch(`https://${ALGOLIA_APP_ID.toLowerCase()}-dsn.algolia.net/1/indexes/*/queries`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-algolia-application-id": ALGOLIA_APP_ID,
-          "x-algolia-api-key": apiKey,
-          Origin: site.baseUrl,
-          Referer: `${site.baseUrl}/`,
+    const apiKey = await fetchAlgoliaKey(signal);
+    try {
+      const data = await queryAlgolia(
+        {
+          siteId: "oliunid",
+          appId: ALGOLIA_APP_ID,
+          apiKey,
+          origin: site.baseUrl,
+          referer: `${site.baseUrl}/`,
+          signal,
         },
-        body: JSON.stringify({
-          requests: [
-            {
+        [
+          {
+            indexName: "magento2_fr_products",
+            params: {
               query,
-              indexName: "magento2_fr_products",
-              params: "hitsPerPage=24&numericFilters=visibility_search%3D1",
+              hitsPerPage: 24,
+              numericFilters: "visibility_search=1",
             },
-          ],
-        }),
-        signal,
-      });
-
-    let res = await doQuery(await fetchAlgoliaKey(signal));
-    if (res.status === 403) {
-      // clé en cache expirée avant son TTL → ré-extraction forcée + retry
-      res = await doQuery(await fetchAlgoliaKey(signal, true));
+          },
+        ]
+      );
+      const hits = data.results?.[0]?.hits ?? [];
+      return extractProducts(hits);
+    } catch (e: any) {
+      // If we get an auth error (403), the cached key may have expired before
+      // its TTL — force-refresh and retry once.
+      if (e instanceof ScraperError && e.category === "auth" && e.statusCode === 403) {
+        logger.forSite("oliunid", "algolia").warn("403 — clé expirée, ré-extraction forcée");
+        const freshKey = await fetchAlgoliaKey(signal, true);
+        const data = await queryAlgolia(
+          {
+            siteId: "oliunid",
+            appId: ALGOLIA_APP_ID,
+            apiKey: freshKey,
+            origin: site.baseUrl,
+            referer: `${site.baseUrl}/`,
+            signal,
+          },
+          [
+            {
+              indexName: "magento2_fr_products",
+              params: {
+                query,
+                hitsPerPage: 24,
+                numericFilters: "visibility_search=1",
+              },
+            },
+          ]
+        );
+        return extractProducts(data.results?.[0]?.hits ?? []);
+      }
+      throw e;
     }
-    if (res.status === 403) throw new ScraperError("oliunid", "Algolia 403 (referer ou clé refusée même après ré-extraction)", { statusCode: 403, category: "auth" });
-    if (!res.ok) throw new Error(`Algolia queries ${res.status}`);
-    const data = (await res.json()) as { results?: { hits?: AlgoliaHit[] }[] };
-    const hits = data.results?.[0]?.hits ?? [];
-
-    const products: ProductResult[] = [];
-    const seen = new Set<string>();
-    for (const h of hits) {
-      if (!h.name || !h.url) continue;
-      const url = absUrl(h.url, site.baseUrl);
-      if (!url || seen.has(url)) continue;
-      seen.add(url);
-      const price = h.price?.EUR?.default ?? null;
-      const original = h.price?.EUR?.default_original ?? null;
-      const discount = price !== null && original !== null && original > price
-        ? Math.round((1 - price / original) * 100)
-        : null;
-      products.push({
-        site: "oliunid",
-        siteName: site.name,
-        title: h.manufacturer && !h.name.toLowerCase().startsWith(h.manufacturer.toLowerCase())
-          ? `${h.manufacturer} ${h.name}`
-          : h.name,
-        url,
-        price,
-        originalPrice: discount !== null ? original : null,
-        currency: "EUR",
-        image: absUrl(h.image_url ?? null, site.baseUrl),
-        availability: "unknown",
-        discount,
-      });
-    }
-    return products;
   },
 };

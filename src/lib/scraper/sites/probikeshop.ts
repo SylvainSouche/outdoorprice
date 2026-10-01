@@ -38,6 +38,10 @@
 import { SiteMeta, ProductResult, Scraper } from "../types";
 
 import { absUrl } from "../http";
+import { ScraperError } from "../error";
+import { logger } from "../../logger";
+
+const log = logger.forSite("probikeshop");
 
 interface DfdCard {
   link: string | null;
@@ -79,7 +83,7 @@ async function openDfdLayer(page: any): Promise<boolean> {
         // Vérifie que le layer DFD est bien ouvert
         const dfdOpen = await page.$(".dfd-fullscreen, .dfd-layer, input.dfd-searchbox-input");
         if (dfdOpen) {
-          console.log(`[probikeshop] layer DFD ouvert via sélecteur "${sel}"`);
+          log.info(`layer DFD ouvert via sélecteur "${sel}"`);
           return true;
         }
         // Si le modal est ouvert mais DFD pas encore chargé, attendre plus longtemps
@@ -87,7 +91,7 @@ async function openDfdLayer(page: any): Promise<boolean> {
         if (modalOpen) {
           try {
             await page.waitForSelector("input.dfd-searchbox-input", { timeout: 5000 });
-            console.log(`[probikeshop] layer DFD ouvert via sélecteur "${sel}" (modal + lazy load)`);
+            log.info(`layer DFD ouvert via sélecteur "${sel}" (modal + lazy load)`);
             return true;
           } catch { /* next selector */ }
         }
@@ -101,7 +105,7 @@ async function openDfdLayer(page: any): Promise<boolean> {
 
 async function loadAndQueryDfd(query: string, signal?: AbortSignal): Promise<DfdCard[]> {
   const pw = await import("playwright" as any).catch(() => null);
-  if (!pw) throw new Error("Playwright non installé");
+  if (!pw) throw new ScraperError("probikeshop", "Playwright non installé", { category: "unknown" });
   const chromium = pw.chromium;
 
   const launchOpts: any = {
@@ -184,7 +188,7 @@ async function loadAndQueryDfd(query: string, signal?: AbortSignal): Promise<Dfd
     // 2) Ouvrir le layer Doofinder (essaie plusieurs sélecteurs)
     const opened = await openDfdLayer(page);
     if (!opened) {
-      throw new Error("Impossible d'ouvrir le layer Doofinder sur la page d'accueil ProBikeShop");
+      throw new ScraperError("probikeshop", "Impossible d'ouvrir le layer Doofinder sur la page d'accueil", { category: "parse" });
     }
     await page.waitForTimeout(1200);
 

@@ -48,7 +48,7 @@ make config
 ### Verify installation
 
 ```bash
-make version         # should print "0.13.1" (or current version)
+make version         # should print the current version
 make check-env       # verify Node/Bun/npm are present
 make run-server             # start dev server → http://localhost:3000
 ```
@@ -57,11 +57,18 @@ make run-server             # start dev server → http://localhost:3000
 
 ## 2. Environment Variables
 
+All variables are **optional** — the app runs with sensible defaults if `.env` is missing or empty.
+Run `make env` to create `.env` from `.env.example` (which lists every variable the codebase actually reads).
+
 ### `.env` file
 
 ```bash
-# Required: Prisma database
-DATABASE_URL=file:./db/custom.db
+# All variables below are OPTIONAL. Defaults shown.
+
+# Scraping behaviour
+SCRAPE_SITE_TIMEOUT_MS=30000         # Per-site timeout (challenge sites use 2x)
+SCRAPE_CACHE_TTL_MS=120000           # In-memory cache TTL (2 min)
+SCRAPE_MAX_PARALLEL_PLAYWRIGHT=3     # Max concurrent Playwright browsers
 
 # Optional: Proxy for scraping (recommended for data-center IPs)
 # PROXY_URL=socks5://user:pass@host:port
@@ -76,17 +83,19 @@ DATABASE_URL=file:./db/custom.db
 # Optional: Disable Playwright fallback
 # SCRAPE_PLAYWRIGHT_FALLBACK=0
 
-# Optional: Per-site timeout (default: 30000ms, 60000ms for challenge sites)
-# SCRAPE_SITE_TIMEOUT_MS=30000
-
-# Optional: Max parallel Playwright browsers (default: 3)
-# SCRAPE_MAX_PARALLEL_PLAYWRIGHT=3
-
-# Optional: Cache TTL (default: 120000ms = 2 min)
-# SCRAPE_CACHE_TTL_MS=120000
+# Cloudflare / anti-bot (Alltricks, etc.)
+SCRAPE_CLOUDFLARE_TIMEOUT_MS=20000
+# SCRAPE_USE_CHROME=0                 # Default: enabled (uses real Chrome)
+# SCRAPE_HEADED=1                     # Default: 0 (headless) — set 1 for debugging
+# PLAYWRIGHT_CHANNEL=chrome           # Override browser channel
 ```
 
-### Debug env vars (set by `make run-server-debug`)
+> **Note:** There is **no database**. OutdoorPrice stores custom groups in
+> localStorage on the client side; no `DATABASE_URL` is required. (Any
+> references to Prisma or DATABASE_URL in older docs were dead code and have
+> been removed in v0.14.21.)
+
+### Debug env vars (set by `make dev-debug`)
 
 ```bash
 # Server-side: dump raw responses to debug/
@@ -545,16 +554,31 @@ This starts the Next.js server on port 3456 and opens an Electron window. The en
 ### Building a distributable
 
 ```bash
-make dist-minor
+make package-mac        # macOS .app + .dmg (unsigned — see below)
+make package-win        # Windows .exe (NSIS installer)
+make package-linux      # Linux .AppImage
 ```
 
-This compiles the Electron main process, builds Next.js, and packages with `electron-builder`. Output goes to `dist-electron/`:
+Output goes to `dist-electron/`:
 
 | Platform | Output | Format |
 |---|---|---|
-| macOS | `OutdoorPrice-<version>.dmg` | Disk image |
+| macOS | `OutdoorPrice-<version>.dmg` | Disk image (unsigned) |
 | Windows | `OutdoorPrice Setup <version>.exe` | NSIS installer |
 | Linux | `OutdoorPrice-<version>.AppImage` | Portable AppImage |
+
+**Note on macOS signing:** v0.14.19+ disables code-signing by default
+(`identity: null` + `CSC_IDENTITY_AUTO_DISCOVERY=false`). The `.app` is
+unsigned — Gatekeeper will refuse to open it by default. To run it:
+
+```bash
+xattr -cr dist-electron/mac-arm64/OutdoorPrice.app   # strip quarantine
+open dist-electron/mac-arm64/OutdoorPrice.app
+```
+
+See [`docs/electron-packaging.md`](./electron-packaging.md) for the full
+build pipeline, all workarounds, and how to re-enable signing for public
+distribution.
 
 ### Why Electron helps with anti-bot
 

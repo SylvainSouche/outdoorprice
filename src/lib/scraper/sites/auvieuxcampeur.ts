@@ -37,6 +37,10 @@ import axios from "axios";
 import { SiteMeta, ProductResult, Scraper } from "../types";
 
 import { pickUserAgent, absUrl } from "../http";
+import { ScraperError } from "../error";
+import { logger } from "../../logger";
+
+const log = logger.forSite("auvieuxcampeur");
 
 const ACCOUNT = "0b09f99d-2b68-4403-8de4-c35fe7bc7d49";
 const ENVIRONMENT_ID = 532;
@@ -64,12 +68,12 @@ async function fetchApiKey(): Promise<string | null> {
     const searchKeyMatch = js.match(/search\s*:\s*\{[^}]*key\s*:\s*"([a-f0-9-]{36})"/i);
     if (searchKeyMatch) {
       const key = searchKeyMatch[1];
-      console.log(`[auvieuxcampeur] x-api-key extrait de tagp.js : ${key.slice(0, 8)}...`);
+      log.debug(`x-api-key extrait de tagp.js : ${key.slice(0, 8)}...`);
       return key;
     }
-    console.warn(`[auvieuxcampeur] tagp.js fetched (${js.length} chars) mais pas de clé trouvée`);
+    log.warn(`tagp.js fetched (${js.length} chars) mais pas de clé trouvée`);
   } catch (e: any) {
-    console.warn(`[auvieuxcampeur] fetch tagp.js échoué : ${e.message}`);
+    log.warn(`fetch tagp.js échoué : ${e.message}`);
   }
   return null;
 }
@@ -175,7 +179,7 @@ function mapItems(items: SfItem[]): ProductResult[] {
  */
 async function captureApiKeyViaPlaywright(query: string, signal?: AbortSignal): Promise<{ apiKey: string | null; products: ProductResult[] }> {
   const pw = await import("playwright" as any).catch(() => null);
-  if (!pw) throw new Error("Playwright non installé");
+  if (!pw) throw new ScraperError("auvieuxcampeur", "Playwright non installé", { category: "unknown" });
   const chromium = pw.chromium;
 
   const browser = await chromium.launch({
@@ -211,7 +215,7 @@ async function captureApiKeyViaPlaywright(query: string, signal?: AbortSignal): 
       const apiKey = headers["x-api-key"] || headers["X-Api-Key"];
       if (apiKey) {
         capturedApiKey = apiKey;
-        console.log(`[auvieuxcampeur] x-api-key capturé via page.route() : ${apiKey.slice(0, 8)}...`);
+        log.debug(`x-api-key capturé via page.route() : ${apiKey.slice(0, 8)}...`);
       }
       // Laisser la requête passer et capturer la réponse
       const response = await route.fetch();
@@ -219,7 +223,7 @@ async function captureApiKeyViaPlaywright(query: string, signal?: AbortSignal): 
         const body = await response.json();
         if (body?.data?.items?.p?.length > 0) {
           capturedResponse = body;
-          console.log(`[auvieuxcampeur] réponse capturée via page.route() : ${body.data.items.p.length} produits`);
+          log.debug(`réponse capturée via page.route() : ${body.data.items.p.length} produits`);
         }
       } catch {}
       // Transmettre la réponse au navigateur
@@ -305,7 +309,7 @@ async function captureApiKeyViaPlaywright(query: string, signal?: AbortSignal): 
     });
     if (sensefuelConfig?.apiKey) {
       capturedApiKey = sensefuelConfig.apiKey;
-      console.log(`[auvieuxcampeur] x-api-key trouvé via ${sensefuelConfig.source} : ${sensefuelConfig.apiKey.slice(0, 8)}...`);
+      log.debug(`x-api-key trouvé via ${sensefuelConfig.source} : ${sensefuelConfig.apiKey.slice(0, 8)}...`);
     }
 
     // Chercher le champ de recherche et taper la requête
@@ -320,7 +324,7 @@ async function captureApiKeyViaPlaywright(query: string, signal?: AbortSignal): 
         const captured = await page.evaluate(() => (window as any).__capturedHeaders || {});
         if (captured.xApiKey) {
           capturedApiKey = captured.xApiKey;
-          console.log(`[auvieuxcampeur] x-api-key capturé via fetch monkey-patch : ${captured.xApiKey.slice(0, 8)}...`);
+          log.debug(`x-api-key capturé via fetch monkey-patch : ${captured.xApiKey.slice(0, 8)}...`);
         }
       }
 
@@ -388,13 +392,13 @@ export const scraper: Scraper = {
           const items = res.data?.data?.items?.p ?? [];
           const products = mapItems(items);
           if (products.length) {
-            console.log(`[auvieuxcampeur] ${products.length} produits récupérés via axios + clé tagp.js`);
+            log.info(`${products.length} produits récupérés via axios + clé tagp.js`);
             return products;
           }
         }
-        console.warn(`[auvieuxcampeur] axios avec clé : HTTP ${res.status}`);
+        log.warn(`axios avec clé : HTTP ${res.status}`);
       } catch (e: any) {
-        console.warn(`[auvieuxcampeur] axios avec clé échoué (${e.message})`);
+        log.warn(`axios avec clé échoué (${e.message})`);
       }
     }
 
@@ -422,14 +426,14 @@ export const scraper: Scraper = {
     } catch {}
 
     // 3) Dernier recours : Playwright (interception + recherche directe)
-    console.warn(`[auvieuxcampeur] axios échoué, tentative Playwright…`);
+    log.warn(`axios échoué, tentative Playwright…`);
     const { products } = await captureApiKeyViaPlaywright(query, signal);
     if (products.length > 0) return products;
 
-    throw new Error(
-      `Au Vieux Campeur : impossible de récupérer des produits. ` +
-      `Clé API ${apiKey ? "trouvée mais" : "non trouvée et"} requête rejetée (401). ` +
-      `L'API SenseFuel peut nécessiter une IP résidentielle.`
+    throw new ScraperError(
+      "auvieuxcampeur",
+      `Impossible de récupérer des produits. Clé API ${apiKey ? "trouvée mais" : "non trouvée et"} requête rejetée (401). L'API SenseFuel peut nécessiter une IP résidentielle.`,
+      { statusCode: 401, category: "auth" }
     );
   },
 };

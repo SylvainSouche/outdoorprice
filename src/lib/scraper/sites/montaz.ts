@@ -32,6 +32,61 @@ export const site: SiteMeta = {
   groups: ["all"],
 };
 
+/**
+ * Parse Montaz search results HTML into ProductResult[].
+ *
+ * Extracted as a pure function so it can be unit-tested with HTML fixtures
+ * (tests/fixtures/montaz/search.html) without network access.
+ */
+export function parseHtml(html: string): ProductResult[] {
+  const $ = cheerio.load(html);
+  const products: ProductResult[] = [];
+  const seen = new Set<string>();
+
+  // Les cartes portent .product-card-image avec des data-attrs
+  const cards = $(".product-card-image[data-prix-final], .product-card-image[data-product]").toArray();
+  cards.slice(0, 24).forEach((el) => {
+    const $el = $(el);
+    const name = ($el.attr("data-name") || "").trim();
+    const prixFinalRaw = ($el.attr("data-prix-final") || "").trim();
+    const prixUnitaireRaw = ($el.attr("data-prix-unitaire") || "").trim();
+    const marque = ($el.attr("data-marque") || "").trim();
+    const linkRaw = ($el.attr("data-link") || "").trim();
+    const imgRaw = ($el.attr("data-img") || "").trim();
+    if (!name) return;
+
+    const href = absUrl(linkRaw, site.baseUrl);
+    if (!href || seen.has(href)) return;
+    seen.add(href);
+
+    const price = parsePrice(prixFinalRaw);
+    // data-prix-unitaire est renseigné même hors promo :
+    // ne le considérer comme « prix barré » que s'il est strictement supérieur au prix payé.
+    const originalPrice = parsePrice(prixUnitaireRaw);
+    const realOriginal =
+      originalPrice && price && originalPrice > price ? originalPrice : null;
+    const discount =
+      realOriginal && price
+        ? Math.round((1 - price / realOriginal) * 100)
+        : null;
+
+    products.push({
+      site: "montaz",
+      siteName: site.name,
+      title: marque ? `${marque} ${name}` : name,
+      url: href,
+      price,
+      originalPrice: realOriginal,
+      currency: "EUR",
+      image: absUrl(imgRaw, site.baseUrl),
+      availability: "unknown",
+      discount,
+    });
+  });
+
+  return products;
+}
+
 export const scraper: Scraper = {
   site,
   capabilities: { engine: "html" },
@@ -42,59 +97,6 @@ export const scraper: Scraper = {
       referer: site.baseUrl,
       timeoutMs: 25000,
     });
-
-    // Note : Montaz redirige certaines recherches (notamment les noms de marques)
-    // vers une page de marque. Ce n'est PAS un bug : pour "Dynafit", la page
-    // /marque-dynafit.html contient 50 produits Dynafit. Pour les recherches
-    // non-marque génériques, le protocole signale que les produits peuvent ne
-    // pas avoir de rapport — mais comme les cartes portent data-name et
-    // data-prix-final, on garde celles qu'on trouve.
-
-    const $ = cheerio.load(html);
-    const products: ProductResult[] = [];
-    const seen = new Set<string>();
-
-    // Les cartes portent .product-card-image avec des data-attrs
-    const cards = $(".product-card-image[data-prix-final], .product-card-image[data-product]").toArray();
-    cards.slice(0, 24).forEach((el) => {
-      const $el = $(el);
-      const name = ($el.attr("data-name") || "").trim();
-      const prixFinalRaw = ($el.attr("data-prix-final") || "").trim();
-      const prixUnitaireRaw = ($el.attr("data-prix-unitaire") || "").trim();
-      const marque = ($el.attr("data-marque") || "").trim();
-      const linkRaw = ($el.attr("data-link") || "").trim();
-      const imgRaw = ($el.attr("data-img") || "").trim();
-      if (!name) return;
-
-      const href = absUrl(linkRaw, site.baseUrl);
-      if (!href || seen.has(href)) return;
-      seen.add(href);
-
-      const price = parsePrice(prixFinalRaw);
-      // data-prix-unitaire est renseigné même hors promo :
-      // ne le considérer comme « prix barré » que s'il est strictement supérieur au prix payé.
-      const originalPrice = parsePrice(prixUnitaireRaw);
-      const realOriginal =
-        originalPrice && price && originalPrice > price ? originalPrice : null;
-      const discount =
-        realOriginal && price
-          ? Math.round((1 - price / realOriginal) * 100)
-          : null;
-
-      products.push({
-        site: "montaz",
-        siteName: site.name,
-        title: marque ? `${marque} ${name}` : name,
-        url: href,
-        price,
-        originalPrice: realOriginal,
-        currency: "EUR",
-        image: absUrl(imgRaw, site.baseUrl),
-        availability: "unknown",
-        discount,
-      });
-    });
-
-    return products;
+    return parseHtml(html);
   },
 };

@@ -43,7 +43,7 @@ Disponible en **app web** (`make run-server`) ou **app desktop Electron** (`make
 | Bike24 | DE | Cycling | ❌ Akamai (via Electron) |
 | Bike-Discount | DE | Cycling | ✅ (Shopware 6) |
 
-**16 sites fonctionnels** depuis le sandbox. **6 bloqués** par anti-bot (Akamai/Cloudflare).
+**17 sites fonctionnels** depuis le sandbox. **5 bloqués** par anti-bot (Akamai/Cloudflare).
 Les sites bloqués fonctionnent depuis une IP résidentielle ou via l'app Electron.
 
 ## Workflow en 3 phases
@@ -138,29 +138,65 @@ make test
 
 ```
 .
-├── Makefile                          # Cibles : config, install, dev, test, lint, check-site
-├── .env.example                      # Template de configuration
+├── Makefile                          # Cibles : config, install, dev, test, lint, check-site, package-mac/win/linux
+├── .env.example                      # Template de configuration (toutes les variables documentées)
+├── .github/workflows/ci.yml          # CI : lint + tests sur chaque push/PR
 ├── README.md                         # Ce fichier
-├── package.json                      # Dépendances + scripts npm
+├── package.json                      # Dépendances + config electron-builder
 ├── vitest.config.ts                  # Config tests
+│
+├── docs/
+│   ├── USER_GUIDE.md                # Guide utilisateur
+│   ├── CONFIGURATION.md              # Install + customize + scraper author guide
+│   ├── DEVELOPMENT.md               # Architecture
+│   └── electron-packaging.md        # Build pipeline + 8 workarounds documentés
+│
+├── electron/
+│   ├── main.ts                       # Process principal Electron (spawn Next.js standalone)
+│   └── preload.ts                   # Bridge renderer ↔ main
+│
+├── extension/                        # Extension Chrome « Shop Protocol Recorder »
+│   ├── manifest.json
+│   ├── background.js
+│   ├── devtools.html / devtools.js / panel.js
+│   └── icons/
+│
+├── public/
+│   ├── logo.svg                      # Source vectorielle de l'icône (lucide Mountain)
+│   ├── icon-{16,32,64,128,256,512,1024}.png  # Générés depuis logo.svg (make icons)
+│   └── icon-mac.png / icon.png      # Alias pour electron-builder
+│
+├── scripts/
+│   ├── cli/
+│   │   ├── check-site.ts             # CLI : vérifier un site seul
+│   │   └── scrape-all.ts             # CLI : scraper tous les sites
+│   ├── prepare-electron-standalone.js  # Prépare electron-resources/ pour electron-builder
+│   ├── generate-icons.py            # Régénère les PNG depuis logo.svg (cairosvg)
+│   └── build-release.sh             # Bump version + tarball + zip extension
 │
 ├── src/
 │   ├── app/
-│   │   ├── page.tsx                  # UI principale (recherche + filtres + cartes produits)
-│   │   ├── layout.tsx                 # Layout racine + QueryClientProvider
+│   │   ├── page.tsx                  # UI principale (1420 lignes — À refactoriser, cf. P1.1)
+│   │   ├── layout.tsx                 # Layout racine + Geist fonts
 │   │   ├── providers.tsx             # TanStack Query provider
-│   │   └── api/search/route.ts       # API : POST/GET /api/search
+│   │   ├── globals.css               # Tailwind 4 + variables CSS
+│   │   └── api/
+│   │       ├── search/route.ts       # POST/GET /api/search
+│   │       └── groups/route.ts       # POST/GET /api/groups (localStorage côté client)
 │   │
 │   └── lib/scraper/
-│       ├── types.ts                  # Types partagés (ProductResult, MatchedProduct, etc.)
-│       ├── http.ts                   # Client HTTP + parsePrice + absUrl + fallback Playwright
-│       ├── playwright.ts             # Wrapper Chromium headless (anti-Cloudflare)
-│       ├── taxonomy.ts               # Classification sport/catégorie/sous-catégorie/gamme
-│       ├── enrich.ts                 # Extraction métadonnées pages produits
+│       ├── types.ts                  # Types partagés (ProductResult, MatchedProduct, SITES record)
+│       ├── http.ts                   # Client HTTP (axios + Playwright fallback + parsePrice + absUrl)
+│       ├── browserPool.ts            # Pool Chromium headless (anti-Cloudflare)
+│       ├── cache.ts                   # Cache LRU in-memory (TTL configurable)
+│       ├── error.ts                  # ScraperError class typée (categories: blocked/auth/parse/timeout/...)
+│       ├── enrich.ts                 # Extraction métadonnées (JSON-LD → microdata → OG → tables)
 │       ├── matcher.ts                # Matching multi-critères (Union-Find + Jaccard)
 │       ├── filters.ts                # Construction filtres dynamiques
-│       ├── registry.ts               # Orchestrateur workflow (PAS de démo)
-│       └── sites/                    # 9 scrapers (1 fichier par site)
+│       ├── taxonomy.ts               # Classification sport/catégorie/sous-catégorie/gamme
+│       ├── registry.ts               # Orchestrateur workflow (parallel scrapers + enrich + match)
+│       └── sites/                    # 22 scrapers (1 fichier par site) + index.ts
+│           ├── index.ts              # Registre : import + export SCRAPERS[]
 │           ├── bergzeit.ts
 │           ├── ekosport.ts
 │           ├── glisshop.ts
@@ -169,18 +205,35 @@ make test
 │           ├── sportbittl.ts
 │           ├── sportconrad.ts
 │           ├── tradeinn.ts
-│           └── auvieuxcampeur.ts
-│
-├── scripts/cli/
-│   ├── check-site.ts                 # CLI : vérifier un site seul
-│   └── scrape-all.ts                 # CLI : scraper tous les sites
+│           ├── auvieuxcampeur.ts
+│           ├── barrabes.ts
+│           ├── probikeshop.ts
+│           ├── alltricks.ts
+│           ├── telemarkpyrenees.ts
+│           ├── sportokay.ts
+│           ├── bergfreunde.ts
+│           ├── hardloop.ts
+│           ├── oliunid.ts
+│           ├── varuste.ts
+│           ├── deporvillage.ts
+│           ├── all4cycling.ts
+│           ├── bike24.ts
+│           └── bikediscount.ts
 │
 └── tests/
     ├── http.test.ts                  # Tests parsePrice, absUrl, cleanTitle
     ├── taxonomy.test.ts              # Tests classification
     ├── matcher.test.ts               # Tests matching multi-critères
-    └── enrich.test.ts                # Tests guessBrand, parseWeightGrams
+    ├── enrich.test.ts                # Tests guessBrand, parseWeightGrams
+    ├── filters.test.ts               # Tests normalisation tailles EU/US/UK
+    ├── csv.test.ts                   # Tests export CSV défensif
+    └── fixtures/                     # HTML fixtures pour tests régression scrapers (cf. P1.2)
+        ├── bergzeit/search.html      # HTML de recherche sauvegardé
+        └── bergzeit/expected.json    # Résultats attendus
 ```
+
+> **Note :** L'ancien README listait 9 scrapers — c'était faux depuis ~v0.12.
+> Le compte réel est **22 scrapers** (vérifié via `grep -c '^  [a-z0-9]\+: {' src/lib/scraper/types.ts`).
 
 ## Makefile — cibles principales
 
@@ -225,7 +278,12 @@ bun run scripts/cli/scrape-all.ts "Dynafit"
 ```
 
 Sites valides : `bergzeit`, `ekosport`, `glisshop`, `montaz`, `snowleader`,
-`sportbittl`, `sportconrad`, `tradeinn`, `auvieuxcampeur`.
+`sportbittl`, `sportconrad`, `tradeinn`, `auvieuxcampeur`, `barrabes`,
+`probikeshop`, `alltricks`, `telemarkpyrenees`, `sportokay`, `bergfreunde`,
+`hardloop`, `oliunid`, `varuste`, `deporvillage`, `all4cycling`,
+`bike24`, `bikediscount`.
+
+(Voir `src/lib/scraper/types.ts` pour la liste officielle à jour.)
 
 ## API
 

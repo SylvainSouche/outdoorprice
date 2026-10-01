@@ -12,6 +12,7 @@
 import axios, { AxiosInstance, AxiosRequestConfig } from "axios";
 import { HttpsProxyAgent } from "https-proxy-agent";
 import { SocksProxyAgent } from "socks-proxy-agent";
+import { logger } from "../logger";
 
 // Proxy global (chargé une fois depuis l'env). Format :
 //   http://user:pass@host:port        → proxy HTTP/HTTPS
@@ -33,10 +34,10 @@ function getProxyAgent(): HttpsProxyAgent<string> | SocksProxyAgent | null {
       CACHED_PROXY_AGENT = new HttpsProxyAgent(url);
     }
      
-    console.log(`[scraper] proxy activé : ${url.replace(/:\/\/[^@]*@/, "://***@")}`);
+    logger.forPhase("http").info(`proxy activé : ${url.replace(/:\/\/[^@]*@/, "://***@")}`);
   } catch (e) {
      
-    console.warn(`[scraper] proxy invalide (${url}) :`, e);
+    logger.forPhase("http").warn(`proxy invalide (${url}) :`, e);
     CACHED_PROXY_AGENT = null;
   }
   return CACHED_PROXY_AGENT;
@@ -53,6 +54,90 @@ const USER_AGENTS = [
 export function pickUserAgent(): string {
   return USER_AGENTS[Math.floor(Math.random() * USER_AGENTS.length)];
 }
+
+// =============================================================================
+// Per-host concurrency limiter (P2.2)
+// -----------------------------------------------------------------------------
+// Without this, two scrapers hitting the same host (e.g. ekosport's homepage
+// AND its Algolia API, or a multi-page pagination on the same shop) would
+// race each other and could trigger anti-bot defenses.
+//
+// The limiter is a simple per-host semaphore: max N concurrent axios requests
+// per hostname, queued via a chain of promises. This is more conservative
+// than a token bucket (no burst capacity) but simpler and correct.
+//
+// Default: 4 concurrent requests per host. Override via SCRAPE_MAX_PER_HOST.
+//   SCRAPE_MAX_PER_HOST=2 → stricter (good for sites that 429 easily)
+//   SCRAPE_MAX_PER_HOST=8 → looser  (good for high-traffic shops)
+//
+// Note: Playwright fallbacks are NOT throttled here — those go through the
+// browser pool (MAX_PARALLEL_PLAYWRIGHT in registry.ts), which already limits
+// concurrency at a coarser grain.
+// =============================================================================
+
+const MAX_PER_HOST = Math.max(1, parseInt(process.env.SCRAPE_MAX_PER_HOST || "4", 10));
+
+interface HostSemaphore {
+  active: number;
+  queue: Array<() => void>;
+}
+
+const hostSemaphores = new Map<string, HostSemaphore>();
+
+function getHostSemaphore(host: string): HostSemaphore {
+  let s = hostSemaphores.get(host);
+  if (!s) {
+    s = { active: 0, queue: [] };
+    hostSemaphores.set(host, s);
+  }
+  return s;
+}
+
+/** Acquire a slot for the given host. Returns a release function. */
+function acquireHostSlot(host: string): Promise<() => void> {
+  const s = getHostSemaphore(host);
+  // Fast path: a slot is immediately available.
+  if (s.active < MAX_PER_HOST) {
+    s.active++;
+    return Promise.resolve(() => releaseHostSlot(host));
+  }
+  // Slow path: queue up. Resolve when a slot is released.
+  return new Promise<() => void>((resolve) => {
+    s.queue.push(() => {
+      s.active++;
+      resolve(() => releaseHostSlot(host));
+    });
+  });
+}
+
+function releaseHostSlot(host: string): void {
+  const s = hostSemaphores.get(host);
+  if (!s) return;
+  s.active--;
+  const next = s.queue.shift();
+  if (next) next();
+}
+
+/** Wrap a Promise in a per-host concurrency slot. */
+async function withHostSlot<T>(host: string, fn: () => Promise<T>): Promise<T> {
+  const release = await acquireHostSlot(host);
+  try {
+    return await fn();
+  } finally {
+    release();
+  }
+}
+
+// ── Exports for testing (P2.2) ────────────────────────────────────────────
+// These are not part of the public API — they let tests verify the limiter
+// behavior without making real network requests.
+export const __test__ = {
+  MAX_PER_HOST,
+  acquireHostSlot,
+  releaseHostSlot,
+  getHostSemaphore,
+  withHostSlot,
+};
 
 export function createHttpClient(opts: {
   timeoutMs?: number;
@@ -121,7 +206,7 @@ export async function fetchHtml(
     } catch (e: any) {
       if (String(e?.message || "").includes("Playwright non installé")) {
          
-        console.warn("[scraper] Playwright non installé, fallback axios");
+        logger.forPhase("http").warn("Playwright non installé, fallback axios");
       } else {
         throw e;
       }
@@ -134,8 +219,17 @@ export async function fetchHtml(
     responseType: "text",
     signal: opts.signal,
   };
+
+  // Extract host for per-domain rate limiting (P2.2).
+  // If URL parsing fails we skip the limiter — better to send the request
+  // unthrottled than to crash the scraper.
+  let host: string | null = null;
+  try { host = new URL(url).hostname; } catch { host = null; }
+
+  const doAxios = () => client.get<string>(url, config);
+
   try {
-    const res = await client.get<string>(url, config);
+    const res = host ? await withHostSlot(host, doAxios) : await doAxios();
     const html = typeof res.data === "string" ? res.data : String(res.data ?? "");
     const status = res.status;
     const finalUrl = res.request?.res?.responseUrl ?? res.config.url ?? url;
@@ -151,7 +245,7 @@ export async function fetchHtml(
         const { fetchHtmlWithPlaywright, isPlaywrightAvailable } = await import("./playwright");
         if (await isPlaywrightAvailable()) {
            
-          console.warn(`[scraper] axios bloqué (status=${status}) pour ${url}, retry Playwright`);
+          logger.forPhase("http").warn(`axios bloqué (status=${status}) pour ${url}, retry Playwright`);
           return await fetchHtmlWithPlaywright(url, {
             timeoutMs: opts.timeoutMs ?? 20000,
             referer: opts.referer,
@@ -161,7 +255,7 @@ export async function fetchHtml(
         }
       } catch (e: any) {
          
-        console.warn(`[scraper] Playwright fallback échoué pour ${url}: ${e?.message}`);
+        logger.forPhase("http").warn(`Playwright fallback échoué pour ${url}: ${e?.message}`);
       }
     }
     return { html, finalUrl, status };
@@ -173,7 +267,7 @@ export async function fetchHtml(
         const { fetchHtmlWithPlaywright, isPlaywrightAvailable } = await import("./playwright");
         if (await isPlaywrightAvailable()) {
            
-          console.warn(`[scraper] axios échoué (${e?.message}) pour ${url}, retry Playwright`);
+          logger.forPhase("http").warn(`axios échoué (${e?.message}) pour ${url}, retry Playwright`);
           return await fetchHtmlWithPlaywright(url, {
             timeoutMs: opts.timeoutMs ?? 20000,
             referer: opts.referer,
