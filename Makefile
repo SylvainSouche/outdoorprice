@@ -36,6 +36,7 @@ R := \033[0m
 .PHONY: help install run run-server release release-minor release-major package-mac package-win package-linux clean clean-all distclean \
 	config check-env env playwright dev dev-debug dev-debug-verbose \
 	test lint check-site scrape-all check-all build version release release-minor release-major \
+	icons prepare-standalone run-packaged verify-packaged \
 	check-bergzeit check-ekosport check-glisshop check-montaz check-snowleader \
 	check-sportbittl check-sportconrad check-tradeinn check-auvieuxcampeur \
 	check-barrabes check-probikeshop check-alltricks check-deporvillage \
@@ -59,9 +60,9 @@ help: ## Afficher cette aide
 install: ## Installer les dépendances
 	@echo -e "$(B)Installation des dépendances...$(R)"
 	@if [ -n "$(BUN)" ]; then \
-		bun install; \
+	        bun install; \
 	else \
-		npm install; \
+	        npm install; \
 	fi
 	@echo -e "$(G)✓ Dépendances installées$(R)"
 
@@ -78,30 +79,30 @@ config: check-env install env playwright ## Installer les prérequis et configur
 check-env: ## Vérifier les prérequis système
 	@echo -e "$(B)Vérification des prérequis...$(R)"
 	@if [ -z "$(NODE)" ]; then \
-		echo -e "$(R)✗ Node.js n'est pas installé. Installez Node 20+ depuis https://nodejs.org$(R)"; \
-		exit 1; \
+	        echo -e "$(R)✗ Node.js n'est pas installé. Installez Node 20+ depuis https://nodejs.org$(R)"; \
+	        exit 1; \
 	fi
 	@echo -e "  $(G)✓$(R) Node.js : $$($(NODE) --version)"
 	@if [ -n "$(BUN)" ]; then \
-		echo -e "  $(G)✓$(R) Bun : $$($(BUN) --version)"; \
+	        echo -e "  $(G)✓$(R) Bun : $$($(BUN) --version)"; \
 	else \
-		echo -e "  $(Y)⚠$(R) Bun non détecté (recommandé). Install : curl -fsSL https://bun.sh/install | bash"; \
+	        echo -e "  $(Y)⚠$(R) Bun non détecté (recommandé). Install : curl -fsSL https://bun.sh/install | bash"; \
 	fi
 
 env: ## Créer le fichier .env depuis .env.example
 	@if [ ! -f .env ]; then \
-		cp .env.example .env; \
-		echo "$(G)✓$(R) .env créé depuis .env.example"; \
+	        cp .env.example .env; \
+	        echo "$(G)✓$(R) .env créé depuis .env.example"; \
 	else \
-		echo "$(Y)⚠$(R) .env existe déjà, préservé"; \
+	        echo "$(Y)⚠$(R) .env existe déjà, préservé"; \
 	fi
 
 playwright: ## Installer Chromium pour Playwright (fallback anti-bot)
 	@echo -e "$(B)Installation de Chromium pour Playwright...$(R)"
 	@if [ -n "$(BUN)" ]; then \
-		bunx playwright install chromium 2>&1 | tail -3; \
+	        bunx playwright install chromium 2>&1 | tail -3; \
 	else \
-		npx playwright install chromium 2>&1 | tail -3; \
+	        npx playwright install chromium 2>&1 | tail -3; \
 	fi
 	@echo -e "$(G)✓ Chromium installé$(R)"
 
@@ -113,9 +114,9 @@ run: ## Lancer l'app desktop (Electron)
 
 run-server: ## Lancer le serveur web seulement (http://localhost:3000)
 	@if [ -n "$(BUN)" ]; then \
-		PORT=$(PORT) bun run dev; \
+	        PORT=$(PORT) bun run dev; \
 	else \
-		PORT=$(PORT) npm run dev; \
+	        PORT=$(PORT) npm run dev; \
 	fi
 
 # Aliases for backward compatibility
@@ -123,26 +124,26 @@ dev: run-server ## Alias pour run-server
 dev-debug: ## Lancer en mode debug (dump dans debug/)
 	@mkdir -p debug
 	@if [ -n "$(BUN)" ]; then \
-		DEBUG_DUMP=1 NEXT_PUBLIC_DEBUG_DUMP=1 PORT=$(PORT) bun run dev; \
+	        DEBUG_DUMP=1 NEXT_PUBLIC_DEBUG_DUMP=1 PORT=$(PORT) bun run dev; \
 	else \
-		DEBUG_DUMP=1 NEXT_PUBLIC_DEBUG_DUMP=1 PORT=$(PORT) npm run dev; \
+	        DEBUG_DUMP=1 NEXT_PUBLIC_DEBUG_DUMP=1 PORT=$(PORT) npm run dev; \
 	fi
 
 dev-debug-verbose: ## Lancer en mode debug verbeux
 	@mkdir -p debug
 	@if [ -n "$(BUN)" ]; then \
-		DEBUG_DUMP=1 DEBUG_VERBOSE=1 NEXT_PUBLIC_DEBUG_DUMP=1 NEXT_PUBLIC_DEBUG_VERBOSE=1 PORT=$(PORT) bun run dev; \
+	        DEBUG_DUMP=1 DEBUG_VERBOSE=1 NEXT_PUBLIC_DEBUG_DUMP=1 NEXT_PUBLIC_DEBUG_VERBOSE=1 PORT=$(PORT) bun run dev; \
 	else \
-		DEBUG_DUMP=1 DEBUG_VERBOSE=1 NEXT_PUBLIC_DEBUG_DUMP=1 NEXT_PUBLIC_DEBUG_VERBOSE=1 PORT=$(PORT) npm run dev; \
+	        DEBUG_DUMP=1 DEBUG_VERBOSE=1 NEXT_PUBLIC_DEBUG_DUMP=1 NEXT_PUBLIC_DEBUG_VERBOSE=1 PORT=$(PORT) npm run dev; \
 	fi
 
 # === Build & Distribute ===
 
 build: ## Build de production (Next.js)
 	@if [ -n "$(BUN)" ]; then \
-		bun run build; \
+	        bun run build; \
 	else \
-		npm run build; \
+	        npm run build; \
 	fi
 
 # === Release (tarball — source code distribution) ===
@@ -156,20 +157,45 @@ release-minor: ## Build tarball + zip (minor version bump)
 release-major: ## Build tarball + zip (major version bump)
 	@./scripts/build-release.sh --major
 
+# === Generate app icons ===
+
+icons: ## Regenerate PNG icons from public/logo.svg (requires cairosvg)
+	@echo -e "$(B)Generating PNG icons from logo.svg...$(R)"
+	@command -v python3 >/dev/null 2>&1 || { echo "$(R)python3 required$(R)"; exit 1; }
+	@python3 -c "import cairosvg" 2>/dev/null || { \
+	        echo "$(R)cairosvg not installed. Run: pip install cairosvg$(R)"; exit 1; }
+	python3 scripts/generate-icons.py
+	@echo -e "$(G)✓ Icons generated in public/$(R)"
+
 # === Package (Electron native app — .dmg/.exe/.AppImage) ===
 
-package-mac: ## Build .app/.dmg macOS (Electron)
-	@echo -e "$(B)Building macOS .app...$(R)"
+prepare-standalone: ## Run scripts/prepare-electron-standalone.js (build electron-resources/standalone/ from .next/standalone/)
+	@echo -e "$(B)Preparing standalone server bundle...$(R)"
+	@command -v node >/dev/null 2>&1 || { echo "$(R)node required$(R)"; exit 1; }
+	@if [ ! -d .next/standalone ]; then \
+	        echo "$(R).next/standalone/ not found. Run 'make build' first.$(R)"; exit 1; \
+	fi
+	node scripts/prepare-electron-standalone.js
+	@echo -e "$(G)✓ electron-resources/standalone/ ready$(R)"
+
+package-mac: ## Build .app/.dmg macOS (Electron) — unsigned (local distribution only)
+	@echo -e "$(B)Building macOS .app (unsigned, no notarization)...$(R)"
 	bunx tsc electron/main.ts electron/preload.ts --outDir dist-electron-src --module commonjs --target es2020 --moduleResolution node --skipLibCheck
 	bun run build
-	bunx electron-builder --mac --arm64
+	node scripts/prepare-electron-standalone.js
+	CSC_IDENTITY_AUTO_DISCOVERY=false bunx electron-builder --mac --arm64 --publish=never
 	@echo -e "$(G)✓ Build terminé — voir dist-electron/$(R)"
+	@echo -e "$(Y)Note: .app is unsigned. To open it:$(R)"
+	@echo -e "  $(Y)xattr -cr dist-electron/mac-arm64/OutdoorPrice.app$(R)"
+	@echo -e "  $(Y)Then double-click it, or:$(R)"
+	@echo -e "  $(Y)make run-packaged$(R)"
 	@ls -la dist-electron/*.dmg 2>/dev/null || echo "  (build output in dist-electron/)"
 
 package-win: ## Build .exe Windows (Electron)
 	@echo -e "$(B)Building Windows .exe...$(R)"
 	bunx tsc electron/main.ts electron/preload.ts --outDir dist-electron-src --module commonjs --target es2020 --moduleResolution node --skipLibCheck
 	bun run build
+	node scripts/prepare-electron-standalone.js
 	bunx electron-builder --win
 	@echo -e "$(G)✓ Build terminé — voir dist-electron/$(R)"
 
@@ -177,19 +203,46 @@ package-linux: ## Build .AppImage Linux (Electron)
 	@echo -e "$(B)Building Linux .AppImage...$(R)"
 	bunx tsc electron/main.ts electron/preload.ts --outDir dist-electron-src --module commonjs --target es2020 --moduleResolution node --skipLibCheck
 	bun run build
+	node scripts/prepare-electron-standalone.js
 	bunx electron-builder --linux
 	@echo -e "$(G)✓ Build terminé — voir dist-electron/$(R)"
+
+run-packaged: ## Run the packaged macOS .app from dist-electron/ (with debug traces)
+	@echo -e "$(B)Running packaged .app with ELECTRON_DEBUG=1...$(R)"
+	@if [ ! -d "dist-electron/mac-arm64/OutdoorPrice.app" ]; then \
+	        echo "$(R)dist-electron/mac-arm64/OutdoorPrice.app not found. Run 'make package-mac' first.$(R)"; exit 1; \
+	fi
+	ELECTRON_DEBUG=1 ./dist-electron/mac-arm64/OutdoorPrice.app/Contents/MacOS/OutdoorPrice
+
+verify-packaged: ## Verify the packaged .app contains all expected standalone files
+	@echo -e "$(B)Verifying packaged .app structure...$(R)"
+	@if [ ! -d "dist-electron/mac-arm64/OutdoorPrice.app" ]; then \
+	        echo "$(R)dist-electron/mac-arm64/OutdoorPrice.app not found. Run 'make package-mac' first.$(R)"; exit 1; \
+	fi
+	@STANDALONE="dist-electron/mac-arm64/OutdoorPrice.app/Contents/Resources/standalone"; \
+	echo -e "$(B)Standalone dir:$$STANDALONE$(R)"; \
+	fail=0; \
+	for f in server.js package.json modules/next/package.json .next/BUILD_ID .next/required-server-files.json .next/static public; do \
+	        if [ ! -e "$$STANDALONE/$$f" ]; then \
+	                echo -e "  $(R)✗ MISSING:$$f$(R)"; fail=1; \
+	        else \
+	                echo -e "  $(G)✓$(R) $$f"; \
+	        fi; \
+	done; \
+	[ $$fail -eq 0 ] && echo -e "$(G)✓ All standalone files present$(R)" || { \
+	        echo "$(R)Some files missing. See docs/electron-packaging.md for troubleshooting.$(R)"; exit 1; \
+	}
 
 # === Clean ===
 
 clean: ## Nettoyer les artefacts de build
-	rm -rf .next dist dev.log server.log
+	rm -rf .next dist dev.log server.log electron-resources dist-electron-src
 	@echo -e "$(G)✓ Artefacts nettoyés$(R)"
 
 clean-all: ## Nettoyer TOUT (ne garder que les fichiers git)
 	@rm -rf .next dist dev.log server.log debug/ dist-electron \
-		electron/*.js electron/*.js.map node_modules/.cache \
-		.next/cache tsconfig.tsbuildinfo 2>/dev/null || true
+	        electron-resources electron/*.js electron/*.js.map node_modules/.cache \
+	        .next/cache tsconfig.tsbuildinfo 2>/dev/null || true
 	@find . -name "*.log" -not -path "./node_modules/*" -delete 2>/dev/null || true
 	@find . -name ".DS_Store" -not -path "./node_modules/*" -delete 2>/dev/null || true
 	@echo -e "$(G)✓ Nettoyage complet — seuls les fichiers git restent$(R)"
@@ -200,16 +253,16 @@ distclean: clean-all ## Alias pour clean-all
 
 test: ## Lancer les tests Vitest
 	@if [ -n "$(BUN)" ]; then \
-		bun run test; \
+	        bun run test; \
 	else \
-		npm run test; \
+	        npm run test; \
 	fi
 
 lint: ## Vérifier la qualité du code (ESLint)
 	@if [ -n "$(BUN)" ]; then \
-		bun run lint; \
+	        bun run lint; \
 	else \
-		npm run lint; \
+	        npm run lint; \
 	fi
 
 check-all: lint test ## Lint + tests
@@ -219,25 +272,25 @@ check-all: lint test ## Lint + tests
 
 check-site: ## Vérifier un site seul : make check-site SITE=bergzeit Q="Dynafit"
 	@if [ -z "$(SITE)" ] || [ -z "$(Q)" ]; then \
-		echo "$(R)Usage: make check-site SITE=<site-id> Q=\"<query>\"$(R)"; \
-		echo "Sites: bergzeit, ekosport, glisshop, montaz, snowleader, sportbittl, sportconrad, tradeinn, auvieuxcampeur, barrabes, probikeshop, alltricks, telemarkpyrenees, sportokay, bergfreunde, hardloop, oliunid, varuste, deporvillage, all4cycling, bike24, bikediscount"; \
-		exit 1; \
+	        echo "$(R)Usage: make check-site SITE=<site-id> Q=\"<query>\"$(R)"; \
+	        echo "Sites: bergzeit, ekosport, glisshop, montaz, snowleader, sportbittl, sportconrad, tradeinn, auvieuxcampeur, barrabes, probikeshop, alltricks, telemarkpyrenees, sportokay, bergfreunde, hardloop, oliunid, varuste, deporvillage, all4cycling, bike24, bikediscount"; \
+	        exit 1; \
 	fi
 	@if [ -n "$(BUN)" ]; then \
-		bun run scripts/cli/check-site.ts $(SITE) "$(Q)" --enrich; \
+	        bun run scripts/cli/check-site.ts $(SITE) "$(Q)" --enrich; \
 	else \
-		npm run check-site -- $(SITE) "$(Q)" --enrich; \
+	        npm run check-site -- $(SITE) "$(Q)" --enrich; \
 	fi
 
 scrape-all: ## Scraper tous les sites : make scrape-all Q="Dynafit"
 	@if [ -z "$(Q)" ]; then \
-		echo "$(R)Usage: make scrape-all Q=\"<query>\"$(R)"; \
-		exit 1; \
+	        echo "$(R)Usage: make scrape-all Q=\"<query>\"$(R)"; \
+	        exit 1; \
 	fi
 	@if [ -n "$(BUN)" ]; then \
-		bun run scripts/cli/scrape-all.ts "$(Q)"; \
+	        bun run scripts/cli/scrape-all.ts "$(Q)"; \
 	else \
-		npm run scrape-all -- "$(Q)"; \
+	        npm run scrape-all -- "$(Q)"; \
 	fi
 
 version: ## Afficher la version actuelle

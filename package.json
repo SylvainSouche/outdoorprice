@@ -1,6 +1,6 @@
 {
   "name": "outdoorprice",
-  "version": "0.14.10",
+  "version": "0.14.20",
   "private": true,
   "description": "Price comparison scraper for outdoor/cycling/sports gear across 22 European shops",
   "main": "dist-electron-src/main.js",
@@ -15,7 +15,7 @@
     "scrape-all": "bun run scripts/cli/scrape-all.ts",
     "playwright:install": "playwright install chromium",
     "electron:dev": "bun run electron:compile && electron electron/main.js",
-    "electron:build": "next build && electron-builder",
+    "electron:build": "next build && node scripts/prepare-electron-standalone.js && electron-builder",
     "electron:compile": "bunx tsc electron/main.ts electron/preload.ts --outDir dist-electron-src --module commonjs --target es2020 --moduleResolution node --skipLibCheck"
   },
   "dependencies": {
@@ -69,47 +69,39 @@
     },
     "files": [
       "dist-electron-src/**/*",
-      ".next/**/*",
-      "public/**/*",
-      "node_modules/**/*",
       "package.json",
       "next.config.ts"
+    ],
+    "extraResources": [
+      {
+        "from": "electron-resources/standalone",
+        "to": "standalone",
+        "filter": ["**/*"]
+      }
     ],
     "mac": {
       "category": "public.app-category.shopping",
       "target": [
         "dmg"
       ],
-      "icon": "public/logo.svg"
+      "icon": "public/icon-mac.png",
+      "identity": null,
+      "hardenedRuntime": false,
+      "gatekeeperAssess": false,
+      "notarize": false
     },
     "win": {
       "target": [
         "nsis"
       ],
-      "icon": "public/logo.svg"
+      "icon": "public/icon-256.png"
     },
     "linux": {
       "target": [
         "AppImage"
       ],
-      "icon": "public/logo.svg",
+      "icon": "public/icon.png",
       "category": "Utility"
-    },
-    "extraResources": [
-      {
-        "from": ".next/standalone",
-        "to": "app/.next/standalone",
-        "filter": [
-          "**/*"
-        ]
-      },
-      {
-        "from": ".next/static",
-        "to": "app/.next/static",
-        "filter": [
-          "**/*"
-        ]
-      }
-    ]
+    }
   }
 }

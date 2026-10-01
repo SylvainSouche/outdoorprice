@@ -1,29 +1,78 @@
-<?xml version="1.0" encoding="utf-8"?>
-<svg version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" x="0px" y="0px"
-	 viewBox="0 0 30 30" style="enable-background:new 0 0 30 30;" xml:space="preserve">
-<defs>
-  <style type="text/css">
-    .st194{fill:#2D2D2D;stroke:#FFFFFF;stroke-width:0.6317;stroke-miterlimit:10;}
-    .st23{fill:#FFFFFF;}
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  OutdoorPrice app icon.
 
-    .z-breathe {
-      animation: breathe 2.5s ease-in-out infinite;
-    }
+  Design rationale:
+    This icon intentionally matches the in-app header (src/app/page.tsx line 432):
+      <div className="grid place-items-center h-9 w-9 rounded-lg bg-stone-900 text-white">
+        <Mountain className="h-5 w-5" />
+      </div>
 
-    @keyframes breathe {
-      0%, 100% { opacity: 0.7; }
-      50% { opacity: 1; }
-    }
-  </style>
-</defs>
+    Both the .app launcher icon AND the in-window header should use the same
+    visual language — a dark rounded-square tile with a white Mountain glyph —
+    so users recognize the app instantly in the dock, in the cmd-tab switcher,
+    and in the window header.
 
-<g>
-  <path class="st194" d="M24.51,28.51H5.49c-2.21,0-4-1.79-4-4V5.49c0-2.21,1.79-4,4-4h19.03c2.21,0,4,1.79,4,4v19.03
-    C28.51,26.72,26.72,28.51,24.51,28.51z"/>
-  <g class="z-breathe">
-    <path class="st23" d="M15.47,7.1l-1.3,1.85c-0.2,0.29-0.54,0.47-0.9,0.47h-7.1V7.09C6.16,7.1,15.47,7.1,15.47,7.1z"/>
-    <polygon class="st23" points="24.3,7.1 13.14,22.91 5.7,22.91 16.86,7.1"/>
-    <path class="st23" d="M14.53,22.91l1.31-1.86c0.2-0.29,0.54-0.47,0.9-0.47h7.09v2.33H14.53z"/>
+    The Mountain glyph is the lucide-react Mountain icon (path data:
+    "m8 3 4 8 5-5 5 15H2L8 3z" on a 24x24 viewBox).
+
+  Colors:
+    - Tile background: stone-900 (#1C1917) — same as the in-app header
+    - Mountain glyph:  white (#FFFFFF)
+
+  Squircle shape: Apple-style rounded rect, not a plain rect, so the icon
+  looks native on macOS dock / iOS springboard / Android home screen.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <!-- Apple-style squircle clip path -->
+    <clipPath id="squircle-clip">
+      <path d="M 256 0
+               C 397 0 460 0 492 32
+               C 524 64 524 127 524 268
+               C 524 409 524 472 492 504
+               C 460 536 397 536 256 536
+               C 115 536 52 536 20 504
+               C -12 472 -12 409 -12 268
+               C -12 127 -12 64 20 32
+               C 52 0 115 0 256 0 Z"/>
+    </clipPath>
+
+    <!-- Subtle gradient on the tile for depth (stone-900 → stone-950) -->
+    <linearGradient id="tile-grad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%"  stop-color="#292524"/>
+      <stop offset="100%" stop-color="#0C0A09"/>
+    </linearGradient>
+  </defs>
+
+  <!-- ── Squircle background ──────────────────────────────────────── -->
+  <g clip-path="url(#squircle-clip)">
+    <rect x="0" y="0" width="512" height="512" fill="url(#tile-grad)"/>
   </g>
-</g>
+
+  <!-- ── Mountain glyph (lucide-react Mountain, scaled to fit) ──── -->
+  <!-- Original: 24x24 viewBox, path "m8 3 4 8 5-5 5 15H2L8 3z"
+       Scale to fit a ~300px Mountain inside a 512px tile, centered.
+       Translate so the original 24x24 viewBox maps to (106,106)-(426,426). -->
+  <g transform="translate(106 106) scale(16)">
+    <!-- stroke: none, fill: white — matching the in-app solid-white Mountain -->
+    <path d="m8 3 4 8 5-5 5 15H2L8 3z"
+          fill="#FFFFFF"
+          stroke="#FFFFFF"
+          stroke-width="0.5"
+          stroke-linejoin="round"
+          stroke-linecap="round"/>
+  </g>
+
+  <!-- Squircle border — subtle, for definition on light backgrounds -->
+  <path d="M 256 0
+           C 397 0 460 0 492 32
+           C 524 64 524 127 524 268
+           C 524 409 524 472 492 504
+           C 460 536 397 536 256 536
+           C 115 536 52 536 20 504
+           C -12 472 -12 409 -12 268
+           C -12 127 -12 64 20 32
+           C 52 0 115 0 256 0 Z"
+        fill="none" stroke="#000000" stroke-width="1" opacity="0.2"/>
 </svg>
