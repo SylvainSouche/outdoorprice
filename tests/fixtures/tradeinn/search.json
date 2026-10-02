@@ -1,0 +1,77 @@
+{
+  "results": [
+    {
+      "product": {
+        "id": "12345",
+        "title": "Speed Radical",
+        "brands": ["Dynafit"],
+        "availability": "IN_STOCK",
+        "image": "https://cdn.tradeinn.com/img/speed-radical.jpg",
+        "uri": "/fr/speed-radical/dynafit/12345?utm_source=internal",
+        "childSku": "DY-SR-12345",
+        "attributes": {
+          "price_all_421_to_450": { "text": ["61:440.00", "70:449.99", "12:450.00"] },
+          "price_all_451_to_500": { "text": ["70:475.00", "61:490.00"] }
+        }
+      }
+    },
+    {
+      "product": {
+        "id": "12346",
+        "title": "Melee",
+        "brands": ["Dynafit"],
+        "availability": "IN_STOCK",
+        "images": [{ "uri": "/img/melee.jpg" }],
+        "uri": "/fr/melee/dynafit/12346",
+        "attributes": {
+          "price_all_301_to_350": { "text": ["70:320.00", "61:340.00"] }
+        }
+      }
+    },
+    {
+      "product": {
+        "id": "12347",
+        "title": "Hawx Ultra 130",
+        "brands": ["Atomic"],
+        "availability": "OUT_OF_STOCK",
+        "image": "//cdn.tradeinn.com/img/hawx.jpg",
+        "url": "/fr/hawx-ultra-130/atomic/12347?tracking=1",
+        "attributes": {
+          "price_all_451_to_500": { "text": ["70:479.99", "61:489.99"] }
+        }
+      }
+    },
+    {
+      "product": {
+        "id": "12348",
+        "title": "Duplicate URL (should be deduped)",
+        "brands": ["Dynafit"],
+        "availability": "IN_STOCK",
+        "uri": "/fr/speed-radical/dynafit/12345?different-params=1",
+        "attributes": {
+          "price_all_1_to_100": { "text": ["70:1.00"] }
+        }
+      }
+    },
+    {
+      "product": {
+        "id": "12349",
+        "title": "No price for France (price should be null)",
+        "brands": ["Brand"],
+        "availability": "IN_STOCK",
+        "uri": "/fr/no-price/brand/12349",
+        "attributes": {
+          "price_all_451_to_500": { "text": ["61:489.99", "12:495.00"] }
+        }
+      }
+    },
+    {
+      "product": {
+        "title": "",
+        "brands": ["Empty"],
+        "uri": "/fr/empty/empty/12350"
+      }
+    }
+  ],
+  "nextPageToken": null
+}

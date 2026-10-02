@@ -1,0 +1,74 @@
+<!--
+  Fixture for tests/bike24.test.ts
+  Synthetic HTML matching the Bike24 product card selectors documented in
+  src/lib/scraper/sites/bike24.ts (parseBike24Html function).
+
+  Bike24's actual page is rendered by a Next.js platform and protected by
+  Akamai Bot Manager. We use synthetic HTML to avoid capturing real product
+  data + to keep the fixture tiny.
+
+  Test cases covered:
+  - Product 1: regular price (no promo), in stock (green checkmark)
+  - Product 2: sale price (red text + crossed-out original + discount badge)
+  - Product 3: out of stock (no green, contains "unavailable")
+  - Product 4: French URL variant (/produits/ instead of /products/)
+  - Noise: link to /products/ but no title attr (should be skipped)
+  - Noise: duplicate URL (should be deduped)
+-->
+<!DOCTYPE html>
+<html>
+<head><title>bike24 — Shimano</title></head>
+<body>
+
+<div class="product-listing">
+
+  <!-- Product 1: regular price, in stock (green check) -->
+  <a href="/products/shimano-ultegra-fd-r8150-di2" title="Shimano Ultegra FD-R8150 Di2 Front Derailleur">
+    <div class="uppercase">Shimano</div>
+    <span class="font-semibold">€149.99</span>
+    <span class="text-green-d500">In stock</span>
+    <img src="/img/ultegra.jpg" alt="Ultegra FD">
+  </a>
+
+  <!-- Product 2: sale price (red) + crossed-out original + discount badge -->
+  <a href="/products/shimano-105-r7100-groupset" title="Shimano 105 R7100 Groupset">
+    <div class="uppercase">Shimano</div>
+    <span class="text-red-d500">€899.99</span>
+    <span class="before:bg-grey line-through">€1099.99</span>
+    <span class="bg-red-d500">-18%</span>
+    <span class="text-green-d500">In stock</span>
+    <img src="//cdn.bike24.com/img/105-groupset.jpg" alt="105 Groupset">
+  </a>
+
+  <!-- Product 3: out of stock (no green, contains "unavailable") -->
+  <a href="/products/shimano-dura-ace-fd-r9250" title="Shimano Dura-Ace FD-R9250 Di2 Front Derailleur">
+    <div class="uppercase">Shimano</div>
+    <span class="font-semibold">€329.00</span>
+    <span class="text-red-d500">Currently unavailable</span>
+    <img src="/img/dura-ace.jpg" alt="Dura-Ace FD">
+  </a>
+
+  <!-- Product 4: French URL (/produits/) — same parsing path -->
+  <a href="/produits/shimano-sora-fd-r3030" title="Shimano Sora FD-R3030 Front Derailleur">
+    <div class="uppercase">Shimano</div>
+    <span class="font-semibold">€45.50</span>
+    <span class="text-green-d500">Disponible</span>
+    <img src="/img/sora.jpg">
+  </a>
+
+  <!-- Noise: link to /products/ but no title attr — should be skipped -->
+  <a href="/products/some-accessory">
+    <div class="uppercase">Brand</div>
+    <span class="font-semibold">€10.00</span>
+  </a>
+
+  <!-- Noise: duplicate of Product 1's URL — should be deduped -->
+  <a href="/products/shimano-ultegra-fd-r8150-di2" title="Shimano Ultegra FD (duplicate URL)">
+    <div class="uppercase">Shimano</div>
+    <span class="font-semibold">€149.99</span>
+  </a>
+
+</div>
+
+</body>
+</html>

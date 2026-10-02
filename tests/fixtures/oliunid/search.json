@@ -1,0 +1,48 @@
+{
+  "results": [
+    {
+      "hits": [
+        {
+          "name": "Speed Radical",
+          "url": "/p/speed-radical",
+          "manufacturer": "Dynafit",
+          "image_url": "https://cdn.oliunid.com/img/speed-radical.jpg",
+          "price": { "EUR": { "default": 450.00, "default_original": 500.00 } }
+        },
+        {
+          "name": "Melee",
+          "url": "/p/melee",
+          "manufacturer": "Dynafit",
+          "image_url": "/img/melee.jpg",
+          "price": { "EUR": { "default": 320.00 } }
+        },
+        {
+          "name": "Hawx Ultra 130",
+          "url": "/p/atomic-hawx-ultra-130",
+          "manufacturer": "Atomic",
+          "image_url": "//cdn.oliunid.com/img/hawx.jpg",
+          "price": { "EUR": { "default": 479.99, "default_original": 549.99 } }
+        },
+        {
+          "name": "MTN Summit LYT 90",
+          "url": "/p/salomon-mtn-summit-90",
+          "manufacturer": "Salomon",
+          "image_url": "https://cdn.oliunid.com/img/mtn-summit.jpg",
+          "price": { "EUR": { "default": 380.00 } }
+        },
+        {
+          "name": "Speed Radical (duplicate URL — should be deduped)",
+          "url": "/p/speed-radical",
+          "manufacturer": "Dynafit",
+          "image_url": "ignored.jpg",
+          "price": { "EUR": { "default": 1.00 } }
+        },
+        {
+          "name": "Missing URL — should be skipped",
+          "manufacturer": "Test",
+          "price": { "EUR": { "default": 100.00 } }
+        }
+      ]
+    }
+  ]
+}

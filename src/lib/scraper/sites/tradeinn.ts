@@ -94,6 +94,58 @@ export const site: SiteMeta = {
   groups: ["all"],
 };
 
+/**
+ * Parse Tradeinn API response (JSON) into ProductResult[].
+ *
+ * Extracted as a pure function so it can be unit-tested with JSON fixtures
+ * (tests/fixtures/tradeinn/search.json) without needing Playwright.
+ *
+ * Tradeinn's API returns products in `data.results[].product`. Each product
+ * has 23 country-specific price buckets (attributes.price_all_X_to_Y) —
+ * we extract the one for France (id=70).
+ */
+export function parseResults(data: TradeinnResponse): ProductResult[] {
+  if (!data || !data.results) return [];
+  const items = data.results;
+  const products: ProductResult[] = [];
+  const seen = new Set<string>();
+
+  items.slice(0, 24).forEach((r) => {
+    const p = r.product;
+    if (!p) return;
+    const title = (p.title || "").trim();
+    if (!title) return;
+    const brand = p.brands?.[0];
+    const sku = p.childSku || p.sku || p.id || "";
+    // La réponse réelle met l'URL dans product.uri (avec params de tracking)
+    const linkRaw = p.uri || p.url || (sku ? `${site.baseUrl}/fr/${sku}` : "");
+    const href = absUrl(linkRaw.split("?")[0], site.baseUrl);
+    if (!href || seen.has(href)) return;
+    seen.add(href);
+
+    const imgRaw =
+      p.image || (p.images?.[0]?.uri ?? p.images?.[0]?.url ?? "");
+    const price = extractFrPrice(p.attributes);
+    const inStock = (p.availability || "").toUpperCase() === "IN_STOCK";
+
+    products.push({
+      site: "tradeinn",
+      siteName: site.name,
+      title: brand ? `${brand} ${title}` : title,
+      url: href,
+      price,
+      originalPrice: null,
+      currency: "EUR",
+      image: absUrl(imgRaw, site.baseUrl),
+      availability: inStock ? "in_stock" : "out_of_stock",
+      availabilityLabel: inStock ? "En stock" : "Rupture",
+      discount: null,
+    });
+  });
+
+  return products;
+}
+
 export const scraper: Scraper = {
   site,
   capabilities: { engine: "rest", usesPlaywright: true, challenge: true },
@@ -122,45 +174,6 @@ export const scraper: Scraper = {
       signal,
     })) as TradeinnResponse;
 
-    if (!data) return [];
-
-    const items = data.results ?? [];
-    const products: ProductResult[] = [];
-    const seen = new Set<string>();
-
-    items.slice(0, 24).forEach((r) => {
-      const p = r.product;
-      if (!p) return;
-      const title = (p.title || "").trim();
-      if (!title) return;
-      const brand = p.brands?.[0];
-      const sku = p.childSku || p.sku || p.id || "";
-      // La réponse réelle met l'URL dans product.uri (avec params de tracking)
-      const linkRaw = p.uri || p.url || (sku ? `${site.baseUrl}/fr/${sku}` : "");
-      const href = absUrl(linkRaw.split("?")[0], site.baseUrl);
-      if (!href || seen.has(href)) return;
-      seen.add(href);
-
-      const imgRaw =
-        p.image || (p.images?.[0]?.uri ?? p.images?.[0]?.url ?? "");
-      const price = extractFrPrice(p.attributes);
-      const inStock = (p.availability || "").toUpperCase() === "IN_STOCK";
-
-      products.push({
-        site: "tradeinn",
-        siteName: site.name,
-        title: brand ? `${brand} ${title}` : title,
-        url: href,
-        price,
-        originalPrice: null,
-        currency: "EUR",
-        image: absUrl(imgRaw, site.baseUrl),
-        availability: inStock ? "in_stock" : "out_of_stock",
-        availabilityLabel: inStock ? "En stock" : "Rupture",
-        discount: null,
-      });
-    });
-
-    return products;
+    return parseResults(data);
   },
 };

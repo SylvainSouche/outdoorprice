@@ -152,16 +152,13 @@ async function tryMakaira(query: string, signal?: AbortSignal): Promise<ProductR
   return products;
 }
 
-/** Fallback HTML via Playwright (si Makaira API indisponible). */
-async function tryHtmlFallback(query: string, signal?: AbortSignal): Promise<ProductResult[]> {
-  const url = `${site.baseUrl}/en/search?q=${encodeURIComponent(query)}`;
-  const { html } = await fetchHtml(url, {
-    signal,
-    referer: site.baseUrl,
-    timeoutMs: 30000,
-    usePlaywright: true,
-    waitForSelector: ".product-card, .product-item, [data-product], .list-item",
-  });
+/**
+ * Parse Sport Conrad search results HTML into ProductResult[].
+ *
+ * Extracted as a pure function so it can be unit-tested with HTML fixtures
+ * (tests/fixtures/sportconrad/search.html) without network access.
+ */
+export function parseSportconradHtml(html: string): ProductResult[] {
   const $ = cheerio.load(html);
   const products: ProductResult[] = [];
   const seen = new Set<string>();
@@ -207,6 +204,19 @@ async function tryHtmlFallback(query: string, signal?: AbortSignal): Promise<Pro
       });
     });
   return products;
+}
+
+/** Fallback HTML via Playwright (si Makaira API indisponible). */
+async function tryHtmlFallback(query: string, signal?: AbortSignal): Promise<ProductResult[]> {
+  const url = `${site.baseUrl}/en/search?q=${encodeURIComponent(query)}`;
+  const { html } = await fetchHtml(url, {
+    signal,
+    referer: site.baseUrl,
+    timeoutMs: 30000,
+    usePlaywright: true,
+    waitForSelector: ".product-card, .product-item, [data-product], .list-item",
+  });
+  return parseSportconradHtml(html);
 }
 
 export const site: SiteMeta = {

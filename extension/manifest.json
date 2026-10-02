@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Shop Protocol Recorder",
-  "version": "0.14.24",
+  "version": "0.14.28",
   "description": "Records network/WebSocket activity on an e-commerce site while you search and navigate products, then generates a protocol.md you can give to an AI to write a new scraper plugin.",
   "permissions": ["storage", "downloads"],
   "background": {

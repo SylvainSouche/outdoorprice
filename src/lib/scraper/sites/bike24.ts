@@ -25,7 +25,7 @@ export const site: SiteMeta = {
   groups: ["cycling"],
 };
 
-function parseBike24Html(html: string): ProductResult[] {
+export function parseBike24Html(html: string): ProductResult[] {
   const $ = cheerio.load(html);
   const products: ProductResult[] = [];
   const seen = new Set<string>();

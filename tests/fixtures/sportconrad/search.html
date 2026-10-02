@@ -1,0 +1,84 @@
+<!--
+  Fixture for tests/sportconrad.test.ts
+  Synthetic HTML matching the Sport Conrad HTML fallback selectors documented
+  in src/lib/scraper/sites/sportconrad.ts (parseSportconradHtml function).
+
+  Sport Conrad's primary API is Makaira (REST/JSON). HTML fallback is only
+  used when Makaira fails. We use synthetic HTML to avoid needing real
+  Playwright capture.
+
+  Test cases covered:
+  - Product 1: regular price (no promo), with brand
+  - Product 2: with old price + discount computed
+  - Product 3: image via data-src (lazy load) instead of src
+  - Product 4: no brand (title only)
+  - Product 5: .product-tile variant selector
+  - Noise: empty card (no title) — should be skipped
+  - Noise: duplicate URL — should be deduped
+-->
+<!DOCTYPE html>
+<html>
+<head><title>sport-conrad — Dynafit</title></head>
+<body>
+
+<div class="search-results">
+
+  <!-- Product 1: regular price with brand -->
+  <div class="product-card">
+    <a href="/product/dynafit-speed-radical::12345.html" class="product-title">Speed Radical</a>
+    <div class="product-brand">Dynafit</div>
+    <span class="price">€450,00</span>
+    <img src="/img/speed-radical.jpg" alt="Speed Radical">
+  </div>
+
+  <!-- Product 2: with old price + discount -->
+  <div class="product-card">
+    <a href="/product/dynafit-melee::12346.html" class="product-title">Melee</a>
+    <div class="product-brand">Dynafit</div>
+    <span class="price">€320,00</span>
+    <del class="old-price">€400,00</del>
+    <img src="https://cdn.sport-conrad.com/img/melee.jpg" alt="Melee">
+  </div>
+
+  <!-- Product 3: image via data-src (lazy load), .product-item variant -->
+  <div class="product-item">
+    <h3 class="product-title">Hawx Ultra 130</h3>
+    <a href="/product/atomic-hawx-ultra::12347.html">Hawx Ultra 130</a>
+    <div class="brand">Atomic</div>
+    <span itemprop="price">€479,99</span>
+    <img data-src="/img/hawx.jpg" alt="Hawx">
+  </div>
+
+  <!-- Product 4: no brand, title in h4 -->
+  <div class="product-card">
+    <h4 class="product-title">Some Binding</h4>
+    <a href="/product/some-binding::12348.html">Some Binding</a>
+    <span class="price">€99,00</span>
+    <img src="/img/binding.jpg" alt="Binding">
+  </div>
+
+  <!-- Product 5: .product-tile variant, title in .product-name -->
+  <div class="product-tile">
+    <a href="/product/salomon-mtn::12349.html">Salomon MTN</a>
+    <div class="product-name">Salomon MTN</div>
+    <div data-brand="Salomon">Salomon</div>
+    <span class="product-price">€380,00</span>
+    <img src="/img/salomon.jpg" alt="Salomon MTN">
+  </div>
+
+  <!-- Noise: empty card (no title) — should be skipped -->
+  <div class="product-card">
+    <a href="/product/empty::12350.html"></a>
+    <span class="price">€0,00</span>
+  </div>
+
+  <!-- Noise: duplicate URL — should be deduped -->
+  <div class="product-card">
+    <a href="/product/dynafit-speed-radical::12345.html">Speed Radical (duplicate)</a>
+    <span class="price">€1,00</span>
+  </div>
+
+</div>
+
+</body>
+</html>

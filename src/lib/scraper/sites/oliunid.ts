@@ -61,7 +61,7 @@ async function fetchAlgoliaKey(signal?: AbortSignal, forceRefresh = false): Prom
 
 /** Extrait la liste de ProductResult depuis les hits Algolia.
  *  Pure function, extracted so it can be unit-tested. */
-function extractProducts(hits: AlgoliaHit[]): ProductResult[] {
+export function extractProducts(hits: AlgoliaHit[]): ProductResult[] {
   const products: ProductResult[] = [];
   const seen = new Set<string>();
   for (const h of hits) {

@@ -1,0 +1,78 @@
+<!--
+  Fixture for tests/alltricks.test.ts
+  Synthetic HTML matching the Alltricks product card selectors documented in
+  src/lib/scraper/sites/alltricks.ts (parseAlltricksHtml function).
+
+  Alltricks is Cloudflare-protected and the page is JS-rendered. The actual
+  page.evaluate() in production runs against the live DOM after Cloudflare
+  challenge resolution. We use synthetic HTML to mirror what that DOM looks
+  like AFTER Cloudflare clears — so the parser can be tested offline.
+
+  Test cases covered:
+  - Product 1: regular price (no promo), with cdn image
+  - Product 2: with promo (price + originalPrice)
+  - Product 3: data-src lazy-loaded image
+  - Product 4: fallback image (no cdn match, non-svg)
+  - Product 5: SVG icon only (should fall back to first non-svg)
+  - Noise: link matches /P- but not /F-XXX/P-XXX pattern — should be skipped
+  - Noise: duplicate URL — should be deduped
+-->
+<!DOCTYPE html>
+<html>
+<head><title>alltricks — Shimano</title></head>
+<body>
+
+<div class="search-results">
+
+  <!-- Product 1: regular price, with cdn image -->
+  <div class="product-card">
+    <a href="/F-100-shimano-ultegra/P-1000-shimano-ultegra-fd-r8150.html" aria-label="Shimano Ultegra FD-R8150">Shimano Ultegra FD-R8150</a>
+    <div class="price">€149,99</div>
+    <img src="https://product-cdn.alltricks.fr/img/ultegra.jpg" alt="Ultegra">
+  </div>
+
+  <!-- Product 2: with promo (price + originalPrice) -->
+  <div class="product-card">
+    <a href="/F-101-shimano-105/P-1001-shimano-105-r7100.html">Shimano 105 R7100 Groupset</a>
+    <div class="price-final price">€899,99</div>
+    <div class="price-original price">€1099,99</div>
+    <img src="https://product-cdn.alltricks.fr/img/105.jpg" alt="105">
+  </div>
+
+  <!-- Product 3: data-src lazy-loaded image -->
+  <div class="product-card">
+    <a href="/F-102-shimano-dura-ace/P-1002-shimano-dura-ace-fd.html">Shimano Dura-Ace FD</a>
+    <div class="price">€329,00</div>
+    <img data-src="https://product-cdn.alltricks.fr/img/dura-ace.jpg" alt="Dura-Ace">
+  </div>
+
+  <!-- Product 4: fallback image (no cdn match, non-svg, non-/images/) -->
+  <div class="product-card">
+    <a href="/F-103-shimano-sora/P-1003-shimano-sora-fd.html">Shimano Sora FD</a>
+    <div class="price">€45,50</div>
+    <img src="/static/sora.jpg" alt="Sora">
+  </div>
+
+  <!-- Product 5: SVG icons present (should be skipped in favor of cdn/non-svg) -->
+  <div class="product-card">
+    <a href="/F-104-castelli/P-1004-castelli-giro.html">Castelli Giro Jersey</a>
+    <div class="price">€75,00</div>
+    <img src="/images/icon-star.svg" alt="rating">
+    <img src="/images/icon-cart.svg" alt="cart">
+    <img src="https://product-cdn.alltricks.fr/img/giro.jpg" alt="Giro">
+  </div>
+
+  <!-- Noise: link has /P- but not /F-XXX/P-XXX pattern — should be skipped -->
+  <a href="/some-link/P-1234-without-F">Invalid product link</a>
+
+  <!-- Noise: duplicate of Product 1's URL — should be deduped -->
+  <div class="product-card">
+    <a href="/F-100-shimano-ultegra/P-1000-shimano-ultegra-fd-r8150.html">Shimano Ultegra (duplicate)</a>
+    <div class="price">€1,00</div>
+    <img src="/img/dup.jpg">
+  </div>
+
+</div>
+
+</body>
+</html>

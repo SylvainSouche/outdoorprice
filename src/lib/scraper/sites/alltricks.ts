@@ -47,6 +47,7 @@
 //   - Le formulaire accepte aussi un paramètre "Search" (uppercase S) dans
 //     l'URL, mais c'est un 404 — seul le POST avec "s" fonctionne.
 // --------------------------------------------------------------------------
+import * as cheerio from "cheerio";
 import { SiteMeta, ProductResult, Scraper } from "../types";
 
 import { absUrl, parsePrice, cleanTitle } from "../http";
@@ -447,6 +448,120 @@ export const site: SiteMeta = {
   accent: "bg-orange-100 text-orange-800 border-orange-200",
   groups: ["cycling"],
 };
+
+/**
+ * Parse Alltricks search results HTML into ProductResult[].
+ *
+ * Extracted as a pure function (P1.2) so it can be unit-tested with HTML
+ * fixtures (tests/fixtures/alltricks/search.html) without needing Playwright.
+ *
+ * This mirrors the logic that was previously inside page.evaluate() —
+ * i.e. it walks <a href*="/P-"> elements that match the product URL pattern,
+ * finds their parent "card" container, and extracts price + image from it.
+ *
+ * The HTML must already have the product cards rendered (Cloudflare must
+ * have been resolved before this function is called).
+ */
+export function parseAlltricksHtml(html: string): ProductResult[] {
+  const $ = cheerio.load(html);
+  const products: ProductResult[] = [];
+  const seen = new Set<string>();
+
+  // Product links have the pattern /F-XXX-slug/P-XXX-slug
+  const PRODUCT_LINK_RE = /\/F-\d+-[^/]+\/P-\d+-/;
+
+  $(`a[href*="/P-"]`).slice(0, 50).each((_, el) => {
+    const $a = $(el);
+    const href = $a.attr("href") || "";
+    if (!PRODUCT_LINK_RE.test(href)) return;
+
+    const absHref = absUrl(href, site.baseUrl);
+    if (!absHref || seen.has(absHref)) return;
+    seen.add(absHref);
+
+    const title = cleanTitle($a.text()) || cleanTitle($a.attr("aria-label") || "");
+    if (!title) return;
+
+    // Find parent container (up to 6 levels up) that has both an img and contains "€"
+    let $container: cheerio.Cheerio<any> | null = null;
+    let $cursor: cheerio.Cheerio<any> = $a;
+    for (let i = 0; i < 6; i++) {
+      $cursor = $cursor.parent();
+      if (!$cursor.length) break;
+      const hasImg = $cursor.find("img").length > 0;
+      const hasPrice = ($cursor.text() || "").includes("€");
+      if (hasImg && hasPrice) {
+        $container = $cursor;
+        break;
+      }
+    }
+    // Fallback: use the link itself if no parent matched
+    if (!$container) $container = $a;
+
+    // Image: prefer cdn URLs that aren't SVG, then non-SVG non-/images/, then anything
+    const imgCandidates: string[] = [];
+    $container.find("img").each((_, im) => {
+      const $im = $(im);
+      const src = $im.attr("src") || "";
+      const dataSrc = $im.attr("data-src") || "";
+      if (src) imgCandidates.push(src);
+      if (dataSrc) imgCandidates.push(dataSrc);
+    });
+    const img =
+      imgCandidates.find((s) => /product-cdn|cdn/i.test(s) && !/\.svg$/i.test(s)) ||
+      imgCandidates.find((s) => !/\.svg$/i.test(s) && !/\/images\//i.test(s)) ||
+      imgCandidates[0] ||
+      null;
+
+    // Price: look at elements with price-like classes, extract first well-formed price
+    let priceText = "";
+    let originalPriceText = "";
+    const $priceEls = $container.find("[class*='price'], .price, .amount, [data-price]");
+    $priceEls.each((_, pel) => {
+      let text = $(pel).text().trim();
+      // Match prices like "1 234,56", "1099,99", "12.99" — allows 1-4 digits
+      // before the decimal separator (handles prices >= 1000 without thousands
+      // separators, which the original \d{1,3} regex missed).
+      const m = text.match(/\d{1,4}(?:[ .]\d{3})*[.,]\d{2}/);
+      if (m) text = m[0];
+      if (!text) return;
+      if (text.includes("€") || /\d+[.,]\d{2}/.test(text)) {
+        if (!priceText) priceText = text;
+        else if (!originalPriceText) originalPriceText = text;
+      }
+    });
+    // Fallback: scan textContent for "X.XX €" pattern
+    if (!priceText) {
+      const fullText = $container.text() || "";
+      const m = fullText.match(/(\d+[.,]\d{2})\s*€/);
+      if (m) priceText = m[0];
+    }
+
+    const price = parsePrice(priceText);
+    const originalPrice = parsePrice(originalPriceText);
+    const realOriginal =
+      originalPrice && price && originalPrice > price ? originalPrice : null;
+    const discount =
+      realOriginal && price
+        ? Math.round((1 - price / realOriginal) * 100)
+        : null;
+
+    products.push({
+      site: "alltricks",
+      siteName: site.name,
+      title,
+      url: absHref,
+      price,
+      originalPrice: realOriginal,
+      currency: "EUR",
+      image: absUrl(img, site.baseUrl),
+      availability: "unknown",
+      discount,
+    });
+  });
+
+  return products;
+}
 
 export const scraper: Scraper = {
   site,
