@@ -165,6 +165,27 @@ async function startServer(port: number): Promise<void> {
     }
     dbg(`Pre-flight OK: all ${required.length} standalone files present`);
 
+    // ── macOS DOCK ICON FIX ──────────────────────────────────────────────
+    // On macOS, spawning process.execPath (the Electron binary) creates a
+    // second dock entry with a generic "exec" icon, even with
+    // ELECTRON_RUN_AS_NODE=1. macOS LaunchServices treats the spawned
+    // process as a new app instance.
+    //
+    // Fix: temporarily set the main app's activation policy to 'accessory'
+    // (background agent — no dock icon) BEFORE spawning the child. The child
+    // inherits the parent's activation policy and won't get its own dock slot.
+    // After the server is ready and the window is about to open, we restore
+    // the activation policy to 'regular' so the main app shows in the dock.
+    const isMacOS = process.platform === "darwin";
+    if (isMacOS) {
+      try {
+        app.setActivationPolicy("accessory");
+        dbg("macOS: activation policy set to 'accessory' (hiding dock icon during server spawn)");
+      } catch (e) {
+        dbg(`macOS: setActivationPolicy('accessory') failed: ${e}`);
+      }
+    }
+
     dbg(`Production mode — spawning: node ${serverJs}`);
     dbg(`  cwd: ${standaloneDir}`);
     dbg(`  resourcesPath: ${process.resourcesPath}`);
@@ -336,6 +357,17 @@ app.whenReady().then(async () => {
     const url = `http://localhost:${port}`;
     dbg(`Loading ${url}`);
     createWindow(url);
+
+    // 5. Restore dock icon on macOS (was hidden to prevent child process
+    //    from getting its own dock slot during spawn).
+    if (process.platform === "darwin") {
+      try {
+        app.setActivationPolicy("regular");
+        dbg("macOS: activation policy restored to 'regular' (dock icon visible)");
+      } catch (e) {
+        dbg(`macOS: setActivationPolicy('regular') failed: ${e}`);
+      }
+    }
 
   } catch (err) {
     console.error(`[electron] Failed to start: ${err}`);
