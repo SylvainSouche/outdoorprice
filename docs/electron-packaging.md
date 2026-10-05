@@ -219,7 +219,47 @@ copyDir(staticSrc, path.join(dest, ".next", "static"));
 
 ---
 
-## Workaround #7 — Copying `public/` into `standalone/public/`
+## Workaround #9 — Force-copying Playwright packages into standalone
+
+### Reason
+
+Next.js's standalone file tracing only copies **entry points** (`index.js`, `index.mjs`) for packages loaded via dynamic `import("playwright")`. The actual `lib/` directory — which contains the browser automation code, the Chromium launcher, the stealth plugin, etc. — is NOT traced.
+
+Without this fix, scrapers that use Playwright (alltricks, glisshop, barrabes, probikeshop, auvieuxcampeur, bike24) throw `"Playwright non installé"` at runtime in the packaged app, even though the npm package IS installed in `node_modules/`.
+
+### What we do
+
+`prepare-standalone.js` explicitly copies the FULL packages from `node_modules/` into `electron-resources/standalone/modules/` after the standalone tracing:
+
+```js
+const PACKAGES_TO_FORCE_COPY = [
+  "playwright",                    // browser automation (chromium, firefox, webkit)
+  "playwright-core",               // core engine (lib/ directory with the actual code)
+  "playwright-extra",              // stealth plugin wrapper
+  "puppeteer-extra-plugin-stealth", // stealth evasion scripts
+];
+for (const pkgName of PACKAGES_TO_FORCE_COPY) {
+  copyDir(
+    path.join(nodeModulesSrc, pkgName),
+    path.join(modulesDest, pkgName)
+  );
+}
+```
+
+This adds ~19 MB to the standalone bundle (5 MB playwright + 14 MB playwright-core) but is required for Playwright-dependent scrapers to work.
+
+### How the runtime finds them
+
+The `NODE_PATH` env var set in `electron/main.ts` points to `.../standalone/modules`. When a scraper does `import("playwright")`, Node.js searches `NODE_PATH` and finds `modules/playwright/index.js`, which `require()`s `playwright-core`, which has its full `lib/` directory present.
+
+### Alternatives we considered
+
+- **`outputFileTracingIncludes` in next.config.ts**: Next.js has a config option to force-include files in the standalone trace, but it's unreliable for complex package trees with many subdirectories.
+- **Static `require("playwright")` instead of dynamic `import()`**: would make the tracer pick it up, but would also bundle Playwright into the client-side bundle (wasteful — Playwright is server-only).
+
+---
+
+## Workaround #10 — Copying `public/` into `standalone/public/`
 
 ### Reason
 

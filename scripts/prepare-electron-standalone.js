@@ -141,6 +141,29 @@ copyDir(staticSrc, path.join(dest, ".next", "static"));
 log(`Copying public/ → standalone/public/`);
 copyDir(publicSrc, path.join(dest, "public"));
 
+// 3b. Copy FULL playwright + playwright-core packages into standalone/modules/
+//     Next.js's standalone file tracing only copies entry points (index.js)
+//     for dynamic import("playwright") — the actual lib/ directory with the
+//     browser automation code is missing. We copy the full packages manually.
+const nodeModulesSrc = path.join(projectRoot, "node_modules");
+const modulesDest = path.join(dest, "modules");
+const PACKAGES_TO_FORCE_COPY = [
+  "playwright",
+  "playwright-core",
+  "playwright-extra",
+  "puppeteer-extra-plugin-stealth",
+];
+for (const pkgName of PACKAGES_TO_FORCE_COPY) {
+  const srcPkg = path.join(nodeModulesSrc, pkgName);
+  const dstPkg = path.join(modulesDest, pkgName);
+  if (fs.existsSync(srcPkg)) {
+    log(`Force-copying full ${pkgName}/ package → modules/${pkgName}/`);
+    copyDir(srcPkg, dstPkg);
+  } else {
+    log(`  WARN: ${pkgName} not found in node_modules/ — scrapers will fail`);
+  }
+}
+
 // 4. Sanity-check the result
 const requiredFiles = [
   "server.js",
