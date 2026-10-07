@@ -41,6 +41,58 @@ import { useSearchState, type SortKey } from "@/lib/search-state";
 import { FilterSection } from "@/components/FilterSection";
 import { FilterBalloon } from "@/components/FilterBalloon";
 import { LogsPanel } from "@/components/LogsPanel";
+import { ShopIcon } from "@/components/ShopIcon";
+
+/** Small result-count / status badge shown at a shop tile's top-right corner. */
+function ShopTileStat({ stat }: { stat?: { count: number; status: string } }) {
+  return (
+    <span className="absolute right-1.5 top-1 text-[9px] leading-none tabular-nums">
+      {stat && stat.count > 0 ? (
+        <span className="font-semibold text-stone-600">{stat.count}</span>
+      ) : stat?.status === "error" ? (
+        <span className="font-semibold text-red-500">err</span>
+      ) : stat?.status === "empty" ? (
+        <span className="text-stone-400">0</span>
+      ) : (
+        <span className="text-stone-300">—</span>
+      )}
+    </span>
+  );
+}
+
+/** Selectable shop tile — 64×64 logo on top, shop name at the bottom. */
+function ShopTile({
+  id, name, selected, onToggle, stat,
+}: {
+  id: string;
+  name: string;
+  selected: boolean;
+  onToggle: () => void;
+  stat?: { count: number; status: string };
+}) {
+  return (
+    <label
+      className={`relative flex cursor-pointer flex-col items-center gap-1 rounded-md border p-2 transition-all ${
+        selected
+          ? "border-stone-300 bg-white shadow-sm hover:border-stone-400"
+          : "border-stone-200 bg-stone-50 opacity-50 grayscale hover:opacity-80 hover:grayscale-0"
+      }`}
+      title={name}
+    >
+      <Checkbox
+        checked={selected}
+        onCheckedChange={onToggle}
+        className="absolute left-1.5 top-1.5 h-3.5 w-3.5"
+        aria-label={name}
+      />
+      <ShopTileStat stat={stat} />
+      <ShopIcon siteId={id} size={64} />
+      <span className="w-full truncate text-center text-[10px] font-medium text-stone-700">
+        {name}
+      </span>
+    </label>
+  );
+}
 
 export function FilterSidebar() {
   const {
@@ -389,29 +441,20 @@ export function FilterSidebar() {
                         </span>
                       </div>
                       {showShopTree && (
-                        <div className="ml-1 border-l border-stone-200 pl-1">
+                        <div className="mt-1.5 grid grid-cols-2 gap-1.5">
                           {groupSites.map((id) => {
                             const meta = SITES[id];
                             const stat = statsBySite.get(id);
                             const isSelected = selectedSites.includes(id);
                             return (
-                              <label key={id} className="flex items-center gap-2 cursor-pointer rounded p-1 hover:bg-stone-50 group/row">
-                                <Checkbox checked={isSelected} onCheckedChange={() => toggleSite(id)} className="h-3.5 w-3.5" />
-                                <span className={`text-xs font-medium px-1.5 py-0.5 rounded ${meta.accent} flex-1 truncate`}>
-                                  {meta.name}
-                                </span>
-                                <span className="text-[10px] text-stone-500 tabular-nums text-right min-w-[3rem]">
-                                  {stat && stat.count > 0 ? (
-                                    <span className="font-medium text-stone-700">{stat.count}</span>
-                                  ) : stat?.status === "error" ? (
-                                    <span className="text-red-500">err</span>
-                                  ) : stat?.status === "empty" ? (
-                                    <span className="text-stone-400">0</span>
-                                  ) : (
-                                    <span className="text-stone-300">—</span>
-                                  )}
-                                </span>
-                              </label>
+                              <ShopTile
+                                key={id}
+                                id={id}
+                                name={meta?.name ?? id}
+                                selected={isSelected}
+                                onToggle={() => toggleSite(id)}
+                                stat={stat}
+                              />
                             );
                           })}
                         </div>
@@ -430,21 +473,20 @@ export function FilterSidebar() {
                         {t("sidebar.other")}
                       </div>
                       {showShopTree && (
-                        <div className="ml-1 border-l border-stone-200 pl-1">
+                        <div className="mt-1.5 grid grid-cols-2 gap-1.5">
                           {ungrouped.map((id) => {
                             const meta = SITES[id];
                             const stat = statsBySite.get(id);
                             const isSelected = selectedSites.includes(id);
                             return (
-                              <label key={id} className="flex items-center gap-2 cursor-pointer rounded p-1 hover:bg-stone-50">
-                                <Checkbox checked={isSelected} onCheckedChange={() => toggleSite(id)} className="h-3.5 w-3.5" />
-                                <span className={`text-xs font-medium px-1.5 py-0.5 rounded ${meta.accent} flex-1 truncate`}>
-                                  {meta.name}
-                                </span>
-                                <span className="text-[10px] text-stone-500 tabular-nums text-right min-w-[3rem]">
-                                  {stat && stat.count > 0 ? stat.count : "—"}
-                                </span>
-                              </label>
+                              <ShopTile
+                                key={id}
+                                id={id}
+                                name={meta?.name ?? id}
+                                selected={isSelected}
+                                onToggle={() => toggleSite(id)}
+                                stat={stat}
+                              />
                             );
                           })}
                         </div>
