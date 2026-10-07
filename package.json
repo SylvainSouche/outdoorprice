@@ -1,6 +1,6 @@
 {
   "name": "outdoorprice",
-  "version": "0.14.35",
+  "version": "0.14.36",
   "private": true,
   "description": "Price comparison scraper for outdoor/cycling/sports gear across 22 European shops",
   "main": "dist-electron-src/main.js",

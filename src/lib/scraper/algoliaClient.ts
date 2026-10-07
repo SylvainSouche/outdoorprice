@@ -46,8 +46,8 @@ export interface AlgoliaHit {
   [key: string]: unknown;
 }
 
-export interface AlgoliaQueryResponse {
-  results?: { hits?: AlgoliaHit[]; nbHits?: number }[];
+export interface AlgoliaQueryResponse<T = AlgoliaHit> {
+  results?: { hits?: T[]; nbHits?: number }[];
 }
 
 export interface AlgoliaClientOpts {
@@ -80,10 +80,10 @@ export interface AlgoliaClientOpts {
  *   );
  *   const hits = res.results?.[0]?.hits ?? [];
  */
-export async function queryAlgolia(
+export async function queryAlgolia<T = AlgoliaHit>(
   opts: AlgoliaClientOpts,
   requests: AlgoliaQueryRequest[]
-): Promise<AlgoliaQueryResponse> {
+): Promise<AlgoliaQueryResponse<T>> {
   const log = logger.forSite(opts.siteId, "algolia");
   const url = `https://${opts.appId.toLowerCase()}-dsn.algolia.net/1/indexes/*/queries`;
   const ua = opts.userAgent ?? "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
@@ -111,7 +111,7 @@ export async function queryAlgolia(
   log.debug(`POST ${url} (${requests.length} request(s))`);
 
   try {
-    const res = await axios.post<AlgoliaQueryResponse>(url, body, {
+    const res = await axios.post<AlgoliaQueryResponse<T>>(url, body, {
       headers,
       timeout: opts.timeoutMs ?? 25000,
       signal: opts.signal,

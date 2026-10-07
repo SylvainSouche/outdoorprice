@@ -29,6 +29,7 @@ import type { ChildProcess } from "child_process";
 import { spawn } from "child_process";
 import * as path from "path";
 import * as net from "net";
+import * as fs from "fs";
 
 let mainWindow: BrowserWindow | null = null;
 let serverProcess: ChildProcess | null = null;
@@ -141,7 +142,6 @@ async function startServer(port: number): Promise<void> {
     // Verify every file the standalone server needs is actually present in
     // the packaged .app. If any are missing, fail fast with a clear error
     // (otherwise Node throws a cryptic `spawn ENOENT` on the binary path).
-    const fs = require("fs");
     const required: Array<[string, string]> = [
       ["standalone dir", standaloneDir],
       ["server.js", serverJs],

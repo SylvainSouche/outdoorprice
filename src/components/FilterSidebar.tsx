@@ -256,7 +256,7 @@ export function FilterSidebar() {
                         setMaxPrice(newHi);
                       }}
                       className="w-full"
-                      aria-label={[t("sidebar.priceMinAria"), t("sidebar.priceMaxAria")]}
+                      aria-label={`${t("sidebar.priceMinAria")} – ${t("sidebar.priceMaxAria")}`}
                     />
                     <div className="flex justify-between text-[10px] text-stone-400">
                       <span>{sliderMin}€</span>

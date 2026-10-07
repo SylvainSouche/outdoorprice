@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+/* eslint-disable @typescript-eslint/no-require-imports -- CommonJS build script (Node), require() is intentional */
 //
 // prepare-electron-standalone.js
 //

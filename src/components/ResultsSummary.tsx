@@ -15,7 +15,7 @@ import {
 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { SITES, type ShopGroup, type SiteId } from "@/lib/scraper/types";
+import { SITES, type ShopGroup, type SiteId, type MatchedProduct } from "@/lib/scraper/types";
 import { useLang, type Lang } from "@/lib/i18n";
 
 export interface SiteResult {
@@ -32,7 +32,7 @@ export interface ResultsSummaryProps {
   sites: SiteResult[];
   durationMs: number;
   phases: { searchMs: number; enrichMs: number; matchMs: number };
-  cheapestOverall: { minPrice: number; minCurrency: string; brand?: string; title: string } | null;
+  cheapestOverall: MatchedProduct | null;
   activeGroupId: string;
   computedGroupSites: SiteId[];
   groups: ShopGroup[];

@@ -141,13 +141,21 @@ interface SearchStateValue {
 
   // Dynamic filter sets
   activeBrands: Set<string>;
+  setActiveBrands: React.Dispatch<React.SetStateAction<Set<string>>>;
   activeCategories: Set<string>;
+  setActiveCategories: React.Dispatch<React.SetStateAction<Set<string>>>;
   activeSubcategories: Set<string>;
+  setActiveSubcategories: React.Dispatch<React.SetStateAction<Set<string>>>;
   activeSports: Set<string>;
+  setActiveSports: React.Dispatch<React.SetStateAction<Set<string>>>;
   activeRanges: Set<string>;
+  setActiveRanges: React.Dispatch<React.SetStateAction<Set<string>>>;
   activeGenders: Set<string>;
+  setActiveGenders: React.Dispatch<React.SetStateAction<Set<string>>>;
   activeColors: Set<string>;
+  setActiveColors: React.Dispatch<React.SetStateAction<Set<string>>>;
   activeSizes: Set<string>;
+  setActiveSizes: React.Dispatch<React.SetStateAction<Set<string>>>;
   toggleSet: (setter: React.Dispatch<React.SetStateAction<Set<string>>>) => (v: string) => void;
 
   // Derived
@@ -453,8 +461,15 @@ export function SearchStateProvider({ children }: { children: ReactNode }) {
     minPrice, setMinPrice, maxPrice, setMaxPrice,
     minSites, setMinSites,
     liveFilter, setLiveFilter,
-    activeBrands, activeCategories, activeSubcategories, activeSports,
-    activeRanges, activeGenders, activeColors, activeSizes, toggleSet,
+    activeBrands, setActiveBrands,
+    activeCategories, setActiveCategories,
+    activeSubcategories, setActiveSubcategories,
+    activeSports, setActiveSports,
+    activeRanges, setActiveRanges,
+    activeGenders, setActiveGenders,
+    activeColors, setActiveColors,
+    activeSizes, setActiveSizes,
+    toggleSet,
     activeFilterCount, resetFilters,
     isDebugMode, showDebug, setShowDebug,
   };

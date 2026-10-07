@@ -23,6 +23,8 @@ export interface ProductResult {
   site: SiteId;
   siteName: string;
   title: string;
+  /** marque si connue dès la recherche (Shopify vendor, Algolia marque, …) */
+  brand?: string;
   url: string;
   price: number | null;
   /** prix d'origine barré si promotion */

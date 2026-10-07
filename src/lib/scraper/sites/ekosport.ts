@@ -149,7 +149,7 @@ export const scraper: Scraper = {
       "genre",
     ].join(",");
 
-    const data = await queryAlgolia(
+    const data = await queryAlgolia<AlgoliaHit>(
       {
         siteId: "ekosport",
         appId,
