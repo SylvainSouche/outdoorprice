@@ -1,6 +1,6 @@
 {
   "name": "outdoorprice",
-  "version": "0.14.30",
+  "version": "0.14.35",
   "private": true,
   "description": "Price comparison scraper for outdoor/cycling/sports gear across 22 European shops",
   "main": "dist-electron-src/main.js",
@@ -16,7 +16,7 @@
     "playwright:install": "playwright install chromium",
     "electron:dev": "bun run electron:compile && electron electron/main.js",
     "electron:build": "next build && node scripts/prepare-electron-standalone.js && electron-builder",
-    "electron:compile": "bunx tsc electron/main.ts electron/preload.ts --outDir dist-electron-src --module commonjs --target es2020 --moduleResolution node --skipLibCheck"
+    "electron:compile": "bunx tsc -p tsconfig.electron.json"
   },
   "dependencies": {
     "@radix-ui/react-checkbox": "^1.3.2",
@@ -83,13 +83,17 @@
     "mac": {
       "category": "public.app-category.shopping",
       "target": [
-        "dmg"
+        "dmg",
+        "dir"
       ],
       "icon": "public/icon-mac.png",
       "identity": null,
       "hardenedRuntime": false,
       "gatekeeperAssess": false,
-      "notarize": false
+      "notarize": false,
+      "extendInfo": {
+        "LSUIElement": true
+      }
     },
     "win": {
       "target": [

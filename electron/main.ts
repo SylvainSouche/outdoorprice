@@ -165,26 +165,20 @@ async function startServer(port: number): Promise<void> {
     }
     dbg(`Pre-flight OK: all ${required.length} standalone files present`);
 
-    // ── macOS DOCK ICON FIX ──────────────────────────────────────────────
-    // On macOS, spawning process.execPath (the Electron binary) creates a
-    // second dock entry with a generic "exec" icon, even with
-    // ELECTRON_RUN_AS_NODE=1. macOS LaunchServices treats the spawned
-    // process as a new app instance.
+    // ── macOS DOCK ICON FIX (LSUIElement approach) ───────────────────────
+    // The app's Info.plist has LSUIElement=true (set via electron-builder's
+    // extendInfo in package.json). This tells macOS to treat the app as a
+    // background agent by default — no dock icon for ANY process launched
+    // from this binary.
     //
-    // Fix: temporarily set the main app's activation policy to 'accessory'
-    // (background agent — no dock icon) BEFORE spawning the child. The child
-    // inherits the parent's activation policy and won't get its own dock slot.
-    // After the server is ready and the window is about to open, we restore
-    // the activation policy to 'regular' so the main app shows in the dock.
-    const isMacOS = process.platform === "darwin";
-    if (isMacOS) {
-      try {
-        app.setActivationPolicy("accessory");
-        dbg("macOS: activation policy set to 'accessory' (hiding dock icon during server spawn)");
-      } catch (e) {
-        dbg(`macOS: setActivationPolicy('accessory') failed: ${e}`);
-      }
-    }
+    // The main process calls app.setActivationPolicy("regular") at startup
+    // (in app.whenReady) to show ITS dock icon. The child process (spawned
+    // below with ELECTRON_RUN_AS_NODE=1) never calls setActivationPolicy,
+    // so it stays hidden — no more "Exec" icon.
+    //
+    // No need for setActivationPolicy("accessory") here — LSUIElement already
+    // makes the default state "hidden". We just need the main process to
+    // opt IN to showing a dock icon, which it does at startup.
 
     dbg(`Production mode — spawning: node ${serverJs}`);
     dbg(`  cwd: ${standaloneDir}`);
@@ -205,6 +199,7 @@ async function startServer(port: number): Promise<void> {
         NODE_ENV: "production",
         SCRAPE_PLAYWRIGHT_FALLBACK: "1",
       },
+      detached: false,
       stdio: ["ignore", "pipe", "pipe"],
     });
   }
@@ -304,6 +299,15 @@ function createWindow(url: string) {
 // ============================================================================
 
 app.whenReady().then(async () => {
+  // LSUIElement=true in Info.plist makes macOS treat this app as a background
+  // agent by default (no dock icon). We call setActivationPolicy("regular")
+  // to show OUR dock icon. The child process (spawned with ELECTRON_RUN_AS_NODE)
+  // never calls this, so it stays hidden — no more "Exec" icon.
+  if (process.platform === "darwin") {
+    app.setActivationPolicy("regular");
+    dbg("macOS: activation policy → 'regular' (main app dock icon visible)");
+  }
+
   const port = await findFreePort(3456);
   console.log(`[electron] Starting server on port ${port}...`);
   dbg(`Debug: ${DEBUG}, Packaged: ${app.isPackaged}`);
@@ -357,17 +361,6 @@ app.whenReady().then(async () => {
     const url = `http://localhost:${port}`;
     dbg(`Loading ${url}`);
     createWindow(url);
-
-    // 5. Restore dock icon on macOS (was hidden to prevent child process
-    //    from getting its own dock slot during spawn).
-    if (process.platform === "darwin") {
-      try {
-        app.setActivationPolicy("regular");
-        dbg("macOS: activation policy restored to 'regular' (dock icon visible)");
-      } catch (e) {
-        dbg(`macOS: setActivationPolicy('regular') failed: ${e}`);
-      }
-    }
 
   } catch (err) {
     console.error(`[electron] Failed to start: ${err}`);

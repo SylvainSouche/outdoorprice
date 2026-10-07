@@ -109,7 +109,7 @@ playwright: ## Installer Chromium pour Playwright (fallback anti-bot)
 # === Run ===
 
 run: ## Lancer l'app desktop (Electron)
-	bunx tsc electron/main.ts electron/preload.ts --outDir dist-electron-src --module commonjs --target es2020 --moduleResolution node --skipLibCheck
+	bunx tsc -p tsconfig.electron.json
 	ELECTRON_DEBUG=1 npx electron dist-electron-src/main.js
 
 run-server: ## Lancer le serveur web seulement (http://localhost:3000)
@@ -180,7 +180,7 @@ prepare-standalone: ## Run scripts/prepare-electron-standalone.js (build electro
 
 package-mac: ## Build .app/.dmg macOS (Electron) — unsigned (local distribution only)
 	@echo -e "$(B)Building macOS .app (unsigned, no notarization)...$(R)"
-	bunx tsc electron/main.ts electron/preload.ts --outDir dist-electron-src --module commonjs --target es2020 --moduleResolution node --skipLibCheck
+	bunx tsc -p tsconfig.electron.json
 	bun run build
 	node scripts/prepare-electron-standalone.js
 	CSC_IDENTITY_AUTO_DISCOVERY=false bunx electron-builder --mac --arm64 --publish=never
@@ -193,7 +193,7 @@ package-mac: ## Build .app/.dmg macOS (Electron) — unsigned (local distributio
 
 package-win: ## Build .exe Windows (Electron)
 	@echo -e "$(B)Building Windows .exe...$(R)"
-	bunx tsc electron/main.ts electron/preload.ts --outDir dist-electron-src --module commonjs --target es2020 --moduleResolution node --skipLibCheck
+	bunx tsc -p tsconfig.electron.json
 	bun run build
 	node scripts/prepare-electron-standalone.js
 	bunx electron-builder --win
@@ -201,7 +201,7 @@ package-win: ## Build .exe Windows (Electron)
 
 package-linux: ## Build .AppImage Linux (Electron)
 	@echo -e "$(B)Building Linux .AppImage...$(R)"
-	bunx tsc electron/main.ts electron/preload.ts --outDir dist-electron-src --module commonjs --target es2020 --moduleResolution node --skipLibCheck
+	bunx tsc -p tsconfig.electron.json
 	bun run build
 	node scripts/prepare-electron-standalone.js
 	bunx electron-builder --linux

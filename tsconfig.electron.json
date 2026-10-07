@@ -1,0 +1,15 @@
+{
+  "compilerOptions": {
+    "module": "commonjs",
+    "target": "es2020",
+    "moduleResolution": "node",
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    "outDir": "dist-electron-src",
+    "rootDir": "electron",
+    "sourceMap": false,
+    "strict": false,
+    "noImplicitAny": false
+  },
+  "include": ["electron/main.ts", "electron/preload.ts"]
+}

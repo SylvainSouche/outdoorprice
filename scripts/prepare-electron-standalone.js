@@ -164,6 +164,73 @@ for (const pkgName of PACKAGES_TO_FORCE_COPY) {
   }
 }
 
+// 3c. Fix broken playwright packages in .next/node_modules/
+//     Next.js creates a symlink .next/node_modules/playwright-<hash> that
+//     points to ../../node_modules/playwright. When we copy the standalone
+//     in step 1, the symlink is resolved — but only the entry points
+//     (index.js, index.mjs) are copied, not the full lib/ directory.
+//     We replace this partial directory with the FULL package from modules/.
+//
+//     We ALSO need to copy playwright-core into .next/node_modules/ because
+//     playwright's index.mjs does `import "playwright-core"` — ESM imports
+//     resolve relative to the importing file, NOT via NODE_PATH. So
+//     playwright-core must be findable from .next/node_modules/.
+const nextNodeModulesDir = path.join(dest, ".next", "node_modules");
+if (fs.existsSync(nextNodeModulesDir)) {
+  log(`Fixing playwright packages in .next/node_modules/ ...`);
+
+  // First: replace the partial playwright-<hash> dir with the full package
+  const entries = fs.readdirSync(nextNodeModulesDir, { withFileTypes: true });
+  for (const entry of entries) {
+    // Match playwright-<hash> directories (Next.js cache-busting naming)
+    if (entry.isDirectory() && /^playwright-[a-f0-9]+$/.test(entry.name)) {
+      const dirPath = path.join(nextNodeModulesDir, entry.name);
+      // Check if it's missing the lib/ directory (i.e. it's just entry points)
+      const hasLib = fs.existsSync(path.join(dirPath, "lib"));
+      if (!hasLib) {
+        log(`  replacing ${entry.name} with full playwright package...`);
+        fs.rmSync(dirPath, { recursive: true, force: true });
+        const srcPkg = path.join(modulesDest, "playwright");
+        if (fs.existsSync(srcPkg)) {
+          copyDir(srcPkg, dirPath);
+          log(`  fixed: ${entry.name} → full playwright package`);
+        } else {
+          log(`  WARN: could not fix ${entry.name} — playwright source not found`);
+        }
+      } else {
+        log(`  ok: ${entry.name} already has lib/`);
+      }
+    }
+  }
+
+  // Second: copy playwright-core, playwright-extra, puppeteer-extra-plugin-stealth
+  // into .next/node_modules/ so ESM import resolution finds them.
+  // ESM imports do NOT respect NODE_PATH — they only resolve from
+  // node_modules/ directories up the file tree.
+  const ESM_PACKAGES = ["playwright-core", "playwright-extra", "puppeteer-extra-plugin-stealth"];
+  for (const pkgName of ESM_PACKAGES) {
+    const dstPkg = path.join(nextNodeModulesDir, pkgName);
+    if (!fs.existsSync(dstPkg)) {
+      const srcPkg = path.join(modulesDest, pkgName);
+      if (fs.existsSync(srcPkg)) {
+        copyDir(srcPkg, dstPkg);
+        log(`  copied: ${pkgName} → .next/node_modules/${pkgName}/ (for ESM import resolution)`);
+      } else {
+        // Fallback: copy from node_modules
+        const nodeModulesSrcPkg = path.join(nodeModulesSrc, pkgName);
+        if (fs.existsSync(nodeModulesSrcPkg)) {
+          copyDir(nodeModulesSrcPkg, dstPkg);
+          log(`  copied: ${pkgName} → .next/node_modules/${pkgName}/ (from node_modules/)`);
+        } else {
+          log(`  WARN: ${pkgName} not found — scrapers using it will fail`);
+        }
+      }
+    } else {
+      log(`  ok: ${pkgName} already in .next/node_modules/`);
+    }
+  }
+}
+
 // 4. Sanity-check the result
 const requiredFiles = [
   "server.js",
